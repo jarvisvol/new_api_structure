@@ -40,7 +40,7 @@ class LoginController extends BaseController {
                         VALUES (?, ?)`, [user_detail[0].id, token]
                     );
                 }
-                res.status(200).send(this.responseSuccess(messages.login_messages.login_success, {access_token: token}));
+                return res.status(200).send(this.responseSuccess(messages.login_messages.login_success, {access_token: token}));
             } else {
                 res.status(400).send(this.responseFailed('invalid credentials'));
             }
