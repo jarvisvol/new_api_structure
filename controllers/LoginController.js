@@ -14,7 +14,7 @@ class LoginController extends BaseController {
     async login(req, res) {
         try {
             const { email, password } = req.body;
-            const [user_detail] = await dataBase.query("SELECT * FROM account WHERE email = ?", [email]);
+            const [user_detail] = await dataBase.query("SELECT * FROM user WHERE email = ?", [email]);
             var user_password = user_detail[0].password
             /// decryption 
             var bytes  = CryptoJS.AES.decrypt(user_password, process.env.PASSWORD_KEY);
@@ -27,16 +27,16 @@ class LoginController extends BaseController {
                 }
                 const secret = process.env.JWT_TOKEN_KEY;
                 const token = jwt.sign(payload, secret);
-                var [check_user_loged_befor] = await dataBase.query('SELECT account_id FROM account_token WHERE account_id = ?', [user_detail[0].id]);
+                var [check_user_loged_befor] = await dataBase.query('SELECT user_id FROM user_token WHERE user_id = ?', [user_detail[0].id]);
                 if (check_user_loged_befor[0]?.account_id) {
                     await dataBase.query(`
-                        UPDATE account_token
+                        UPDATE user_token
                         SET access_token = ?
-                        WHERE account_id = ?`, [token, user_detail[0].id]
+                        WHERE user_id = ?`, [token, user_detail[0].id]
                     );
                 } else {
                     await dataBase.query(`
-                        INSERT INTO account_token (account_id, access_token)
+                        INSERT INTO user_token (user_id, access_token)
                         VALUES (?, ?)`, [user_detail[0].id, token]
                     );
                 }
@@ -55,7 +55,7 @@ class LoginController extends BaseController {
         var userDetails = req.body;
         const { password } = req.body;
         var encryptedPassword = CryptoJS.AES.encrypt(password, process.env.PASSWORD_KEY).toString();
-        const user_insert = await dataBase.query('INSERT INTO account (email, phone_number, password, name, user_name) VALUES(?, ? ,?, ?, ?)', [userDetails.email, userDetails.phoneNumber, encryptedPassword, userDetails.name, userDetails.userName]);
+        const user_insert = await dataBase.query('INSERT INTO user (email, phone_number, password, name) VALUES(?, ? ,?, ?)', [userDetails.email, userDetails.phoneNumber, encryptedPassword, userDetails.name]);
         res.status(200).send({ messeage: "user created successfuly", userDetails: user_insert });
     }
 }
