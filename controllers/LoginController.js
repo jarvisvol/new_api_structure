@@ -17,7 +17,7 @@ class LoginController extends BaseController {
             const [user_detail] = await dataBase.query("SELECT * FROM user WHERE email = ?", [email]);
             var user_password = user_detail[0].password
             /// decryption 
-            var bytes  = CryptoJS.AES.decrypt(user_password, process.env.PASSWORD_KEY);
+            var bytes = CryptoJS.AES.decrypt(user_password, process.env.PASSWORD_KEY);
             var deCryptedPassword = bytes.toString(CryptoJS.enc.Utf8);
             if (password === deCryptedPassword) {
                 const payload = {
@@ -28,7 +28,7 @@ class LoginController extends BaseController {
                 const secret = process.env.JWT_TOKEN_KEY;
                 const token = jwt.sign(payload, secret);
                 var [check_user_loged_befor] = await dataBase.query('SELECT user_id FROM user_token WHERE user_id = ?', [user_detail[0].id]);
-                if (check_user_loged_befor[0]?.account_id) {
+                if (check_user_loged_befor[0]?.user_id) {
                     await dataBase.query(`
                         UPDATE user_token
                         SET access_token = ?
@@ -40,7 +40,7 @@ class LoginController extends BaseController {
                         VALUES (?, ?)`, [user_detail[0].id, token]
                     );
                 }
-                return res.status(200).send(this.responseSuccess(messages.login_messages.login_success, {access_token: token}));
+                return res.status(200).send(this.responseSuccess(messages.login_messages.login_success, { access_token: token }));
             } else {
                 res.status(400).send(this.responseFailed('invalid credentials'));
             }
@@ -58,6 +58,40 @@ class LoginController extends BaseController {
         const user_insert = await dataBase.query('INSERT INTO user (email, phone_number, password, name) VALUES(?, ? ,?, ?)', [userDetails.email, userDetails.phoneNumber, encryptedPassword, userDetails.name]);
         res.status(200).send({ messeage: "user created successfuly", userDetails: user_insert });
     }
+
+    async getUserList(req, res) {
+        var resp = await dataBase.query('SELECT * FROM user');
+        res.status(200).send({ messeage: "user list get successfuly", data: resp[0] });
+    }
+
+    async setPasscode(req, res) {
+        var { user_id, pass_code } = req.body;
+        try {
+            const result = await dataBase.query(`
+                insert into user_passcode (user_id, passcode) values(?, ?)
+                `, [user_id, pass_code]);
+            res.status(201).send(this.responseSuccess('passcode created successfully', result))
+        } catch (error) {
+            res.send(error)
+        }
+    }
+
+    async checkPasscode(req, res) {
+        var {user_id, pass_code} = req.body;
+        var [user_data] = await dataBase.query(`
+            select user_id, passcode
+            from user_passcode
+            where user_id = ?
+            `, [user_id]);
+        if(user_data[0].passcode == pass_code){
+            res.status(200).send(this.responseSuccess('successfully loged in',0))
+        } else {
+            res.status(400).send(this.responseFailed('something went wrong'));
+        }
+
+    }
+
+
 }
 
 module.exports = LoginController;
