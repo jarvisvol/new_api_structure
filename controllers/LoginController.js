@@ -131,6 +131,22 @@ class LoginController extends BaseController {
         
     }
 
+    async checkToken(token) {
+        try {
+            const [user] = await dataBase.query(`
+                select name, user_id, user.email
+                from user_token
+                left join user on user.id = user_token.user_id
+                where access_token = ?
+                `,[token]
+            )
+            return user;
+        } catch (error) {
+           return false;
+        }
+        
+    }
+
 
 }
 
