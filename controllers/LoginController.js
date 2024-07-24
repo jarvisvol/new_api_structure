@@ -3,13 +3,15 @@ var CryptoJS = require("crypto-js");
 var jwt = require('jsonwebtoken');
 const messages = require("../public/messages/messages");
 const BaseController = require('./BaseController');
+const MailSender = require('../mailer/mail');
 require('dotenv').config();
 
 class LoginController extends BaseController {
 
-    // constructor() {
-    //     this.dataBase = dataBase;
-    // }
+    constructor() {
+        super();
+        this.MailSender = new MailSender();
+    }
 
     async login(req, res) {
         try {
@@ -55,7 +57,10 @@ class LoginController extends BaseController {
         var userDetails = req.body;
         const { password } = req.body;
         var encryptedPassword = CryptoJS.AES.encrypt(password, process.env.PASSWORD_KEY).toString();
-        const user_insert = await dataBase.query('INSERT INTO user (email, phone_number, password, name) VALUES(?, ? ,?, ?)', [userDetails.email, userDetails.phoneNumber, encryptedPassword, userDetails.name]);
+        var otp = Math.random(0,1);
+        otp = Math.floor(otp*100000);
+        this.MailSender.mailToSomeone(userDetails.email, otp);
+        const user_insert = await dataBase.query('INSERT INTO user (email, phone_number, password, name, otp) VALUES(?, ? ,?, ?, ?)', [userDetails.email, userDetails.phoneNumber, encryptedPassword, userDetails.name, otp]);
         res.status(200).send({ messeage: "user created successfuly", userDetails: user_insert });
     }
 
@@ -89,6 +94,41 @@ class LoginController extends BaseController {
             res.status(400).send(this.responseFailed('something went wrong'));
         }
 
+    }
+
+    async resendOtp(req, res){
+        var {email} = req.body
+        var otp = Math.random(0,1);
+        otp = Math.floor(otp*100000);
+        this.MailSender.mailToSomeone(email, otp);
+        
+        try {
+            var result = await dataBase.query(`
+                update user
+                set otp = ${otp}
+                where email = '${email}'`
+            );
+            res.status(200).send(this.responseSuccess('successfully resend the  otp',result)) 
+        } catch (error) {
+            console.log(error);
+            res.status(400).send(this.responseFailed('something went wrong'));
+        }
+        
+    }
+
+    async checkOtp(req, res){
+        var {email, otp} = req.body;
+        const [user_data] = await dataBase.query(`
+            select *
+            from user
+            where email = ?
+            `, [email])
+        if(user_data[0].otp == otp){
+            res.status(200).send(this.responseSuccess('successfully verified otp in',1)) 
+        } else{
+            res.status(400).send(this.responseFailed('something went wrong'));
+        }
+        
     }
 
 

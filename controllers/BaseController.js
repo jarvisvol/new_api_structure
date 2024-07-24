@@ -1,4 +1,7 @@
 class BaseController {
+    constructor(){
+        //
+    }
 
     responseSuccess(message, result){
         return {

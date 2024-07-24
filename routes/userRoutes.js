@@ -24,4 +24,13 @@ router.post('/set-pass-code', (req, res) => {
 router.post('/check-passcode', (req, res) => {
     login_controller.checkPasscode(req, res);
 })
+
+router.post('/check-otp', (req, res) => {
+    login_controller.checkOtp(req, res);
+})
+
+router.post('/resend-otp', (req, res) => {
+    login_controller.resendOtp(req, res);
+})
+
 module.exports = router;
