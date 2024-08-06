@@ -11,10 +11,11 @@ class BaseController {
         }
     }
 
-    responseFailed(message){
+    responseFailed(message, error){
         return {
             status:"error",
             message: message,
+            error: error
         }
     }
 }

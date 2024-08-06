@@ -33,4 +33,8 @@ router.post('/resend-otp', (req, res) => {
     login_controller.resendOtp(req, res);
 })
 
+router.get('/user-detail', (req, res) => {
+    login_controller.userDetail(req, res);
+})
+
 module.exports = router;

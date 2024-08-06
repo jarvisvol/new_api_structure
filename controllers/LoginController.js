@@ -57,8 +57,8 @@ class LoginController extends BaseController {
         var userDetails = req.body;
         const { password } = req.body;
         var encryptedPassword = CryptoJS.AES.encrypt(password, process.env.PASSWORD_KEY).toString();
-        var otp = Math.random(0,1);
-        otp = Math.floor(otp*100000);
+        var otp = Math.random(0, 1);
+        otp = Math.floor(otp * 100000);
         this.MailSender.mailToSomeone(userDetails.email, otp);
         const user_insert = await dataBase.query('INSERT INTO user (email, phone_number, password, name, otp) VALUES(?, ? ,?, ?, ?)', [userDetails.email, userDetails.phoneNumber, encryptedPassword, userDetails.name, otp]);
         res.status(200).send({ messeage: "user created successfuly", userDetails: user_insert });
@@ -82,53 +82,53 @@ class LoginController extends BaseController {
     }
 
     async checkPasscode(req, res) {
-        var {user_id, pass_code} = req.body;
+        var { user_id, pass_code } = req.body;
         var [user_data] = await dataBase.query(`
             select user_id, passcode
             from user_passcode
             where user_id = ?
             `, [user_id]);
-        if(user_data[0].passcode == pass_code){
-            res.status(200).send(this.responseSuccess('successfully loged in',0))
+        if (user_data[0].passcode == pass_code) {
+            res.status(200).send(this.responseSuccess('successfully loged in', 0))
         } else {
             res.status(400).send(this.responseFailed('something went wrong'));
         }
 
     }
 
-    async resendOtp(req, res){
-        var {email} = req.body
-        var otp = Math.random(0,1);
-        otp = Math.floor(otp*100000);
+    async resendOtp(req, res) {
+        var { email } = req.body
+        var otp = Math.random(0, 1);
+        otp = Math.floor(otp * 100000);
         this.MailSender.mailToSomeone(email, otp);
-        
+
         try {
             var result = await dataBase.query(`
                 update user
                 set otp = ${otp}
                 where email = '${email}'`
             );
-            res.status(200).send(this.responseSuccess('successfully resend the  otp',result)) 
+            res.status(200).send(this.responseSuccess('successfully resend the  otp', result))
         } catch (error) {
             console.log(error);
             res.status(400).send(this.responseFailed('something went wrong'));
         }
-        
+
     }
 
-    async checkOtp(req, res){
-        var {email, otp} = req.body;
+    async checkOtp(req, res) {
+        var { email, otp } = req.body;
         const [user_data] = await dataBase.query(`
             select *
             from user
             where email = ?
             `, [email])
-        if(user_data[0].otp == otp){
-            res.status(200).send(this.responseSuccess('successfully verified otp in',1)) 
-        } else{
+        if (user_data[0].otp == otp) {
+            res.status(200).send(this.responseSuccess('successfully verified otp in', 1))
+        } else {
             res.status(400).send(this.responseFailed('something went wrong'));
         }
-        
+
     }
 
     async checkToken(token) {
@@ -138,13 +138,34 @@ class LoginController extends BaseController {
                 from user_token
                 left join user on user.id = user_token.user_id
                 where access_token = ?
-                `,[token]
+                `, [token]
             )
             return user;
         } catch (error) {
-           return false;
+            return false;
         }
-        
+
+    }
+
+    async userDetail(req, res) {
+        var token = req.headers;
+        token = token.accesstoken;
+        try {
+            if(token.lenght){
+            const [result] = await dataBase.query(`
+                select *
+                from user_token
+                left join user on user.id = user_token.user_id
+                where access_token = ?
+                `, [token]
+            );
+                res.status(200).send(this.responseSuccess('successfully verified otp in', result[0]))
+            }
+        } catch (error) {
+            res.status(401).send(this.responseFailed('Not Authorize'));
+        }
+
+
     }
 
 
