@@ -17,13 +17,13 @@ router.get('/list', (req, res) => {
     login_controller.getUserList(req, res);
 })
 
-router.post('/set-pass-code', (req, res) => {
-    login_controller.setPasscode(req, res);
-}) 
+// router.post('/set-pass-code', (req, res) => {
+//     login_controller.setPasscode(req, res);
+// }) 
 
-router.post('/check-passcode', (req, res) => {
-    login_controller.checkPasscode(req, res);
-})
+// router.post('/check-passcode', (req, res) => {
+//     login_controller.checkPasscode(req, res);
+// })
 
 router.post('/check-otp', (req, res) => {
     login_controller.checkOtp(req, res);

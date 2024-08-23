@@ -44,7 +44,7 @@ class LoginController extends BaseController {
                 }
                 return res.status(200).send(this.responseSuccess(messages.login_messages.login_success, { access_token: token }));
             } else {
-                res.status(400).send(this.responseFailed('invalid credentials'));
+                res.status(400).send(this.responseFailed('Invalid credentials'));
             }
 
         } catch (err) {
@@ -61,7 +61,7 @@ class LoginController extends BaseController {
         otp = Math.floor(otp * 100000);
         this.MailSender.mailToSomeone(userDetails.email, otp);
         const user_insert = await dataBase.query('INSERT INTO user (email, phone_number, password, name, otp) VALUES(?, ? ,?, ?, ?)', [userDetails.email, userDetails.phoneNumber, encryptedPassword, userDetails.name, otp]);
-        res.status(200).send({ messeage: "user created successfuly", userDetails: user_insert });
+        res.status(200).send({ messeage: "user created successfuly", userDetails: {...user_insert, email: userDetails.email} });
     }
 
     async getUserList(req, res) {
@@ -124,7 +124,28 @@ class LoginController extends BaseController {
             where email = ?
             `, [email])
         if (user_data[0].otp == otp) {
-            res.status(200).send(this.responseSuccess('successfully verified otp in', 1))
+            const [user_detail] = await dataBase.query("SELECT * FROM user WHERE email = ?", [email]);
+            const payload = {
+                email: user_detail[0].email,
+                userId: user_detail[0].id,
+                phoneNumber: user_detail[0].phone_number
+            }
+            const secret = process.env.JWT_TOKEN_KEY;
+            const token = jwt.sign(payload, secret);
+            var [check_user_loged_befor] = await dataBase.query('SELECT user_id FROM user_token WHERE user_id = ?', [user_detail[0].id]);
+                if (check_user_loged_befor[0]?.user_id) {
+                    await dataBase.query(`
+                        UPDATE user_token
+                        SET access_token = ?
+                        WHERE user_id = ?`, [token, user_detail[0].id]
+                    );
+                } else {
+                    await dataBase.query(`
+                        INSERT INTO user_token (user_id, access_token)
+                        VALUES (?, ?)`, [user_detail[0].id, token]
+                    );
+                }
+            res.status(200).send(this.responseSuccess('OTP verified successfully', {accessToken: token}))
         } else {
             res.status(400).send(this.responseFailed('something went wrong'));
         }

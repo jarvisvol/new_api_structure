@@ -8,7 +8,9 @@ var indexRouter = require('./routes/index');
 var userRoutes = require('./routes/userRoutes.js');
 var employeeRoutes = require('./routes/employeeRoutes.js');
 var workItemRoutes = require('./routes/workitemRoutes.js');
-var phasesRoutes = require('./routes/PhaseRoutes.js')
+var phasesRoutes = require('./routes/PhaseRoutes.js');
+var pay_routes = require('./routes/paymentRoutes.js');
+
 const cors = require('cors');
 
 var app = express();
@@ -29,6 +31,7 @@ app.use('/api/user', userRoutes);
 app.use('/api/employee', employeeRoutes);
 app.use('/api/work-item', workItemRoutes);
 app.use('/api/phases', phasesRoutes);
+app.use('/api/pay', pay_routes)
 
 // catch 404 and forward to error handler
 app.use(function(req, res, next) {
