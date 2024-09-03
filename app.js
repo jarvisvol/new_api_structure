@@ -26,12 +26,12 @@ app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(cors())
 
-app.use('/api', indexRouter);
-app.use('/api/user', userRoutes);
-app.use('/api/employee', employeeRoutes);
-app.use('/api/work-item', workItemRoutes);
-app.use('/api/phases', phasesRoutes);
-app.use('/api/pay', pay_routes)
+// app.use('/api', indexRouter);
+app.use('/user', userRoutes);
+app.use('/employee', employeeRoutes);
+app.use('/work-item', workItemRoutes);
+app.use('/phases', phasesRoutes);
+app.use('/pay', pay_routes)
 
 // catch 404 and forward to error handler
 app.use(function(req, res, next) {
