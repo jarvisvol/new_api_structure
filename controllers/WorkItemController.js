@@ -39,12 +39,12 @@ class WorkItem extends BaseController{
     async updateWorkItem(req, res){
         try {
             var workitemId =  req.params.workitemId
-            var {name, description} = req.body;
+            var {name, description, dashboard_phase_id} = req.body;
             const [result] = await dataBase.query(`
                 update workitem
-                set name = ?, description = ?
+                set name = ?, description = ?, dashboard_phase_id = ?
                 where id = ?
-            `, [name, description, workitemId])
+            `, [name, description, dashboard_phase_id, workitemId])
             res.status(200).send(this.responseSuccess('n', result))
         } catch (error) {
             res.status(400).send(this.responseFailed('successfully  in',error))
