@@ -17,14 +17,6 @@ router.get('/list', (req, res) => {
     login_controller.getUserList(req, res);
 })
 
-// router.post('/set-pass-code', (req, res) => {
-//     login_controller.setPasscode(req, res);
-// }) 
-
-// router.post('/check-passcode', (req, res) => {
-//     login_controller.checkPasscode(req, res);
-// })
-
 router.post('/check-otp', (req, res) => {
     login_controller.checkOtp(req, res);
 })
@@ -35,6 +27,21 @@ router.post('/resend-otp', (req, res) => {
 
 router.get('/user-detail', (req, res) => {
     login_controller.userDetail(req, res);
+})
+
+router.get('/check-token', async(req, res) => {
+    var token = req.headers;
+    token = token.accesstoken
+    const result = await login_controller.checkToken(token);
+    if(result[0]?.user_id){
+        req.body = {
+            ...req.body,
+            userDetails: result[0]
+        };
+        res.status(200).send("token veryfied");
+    } else {
+        res.status(401).send("you are not authorized fro this request");
+    }
 })
 
 module.exports = router;
