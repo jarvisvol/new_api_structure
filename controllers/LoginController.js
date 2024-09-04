@@ -172,17 +172,15 @@ class LoginController extends BaseController {
         var token = req.headers;
         token = token.accesstoken;
         try {
-            if(token.lenght){
             const [result] = await dataBase.query(`
-                select *
+                select user.id, name, email
                 from user_token
                 left join user on user.id = user_token.user_id
                 where access_token = ?
                 `, [token]
             );
-                res.status(200).send(this.responseSuccess('successfully verified otp in', result[0]))
-            }
-        } catch (error) {
+            res.status(200).send(this.responseSuccess('successfully get', result[0]))
+        } catch (error) {            
             res.status(401).send(this.responseFailed('Not Authorize'));
         }
 
