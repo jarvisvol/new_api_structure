@@ -21,6 +21,9 @@ class LoginController extends BaseController {
             /// decryption 
             var bytes = CryptoJS.AES.decrypt(user_password, process.env.PASSWORD_KEY);
             var deCryptedPassword = bytes.toString(CryptoJS.enc.Utf8);
+            if(user_detail[0].otp_verified !== 1){
+                return res.status(400).send(this.responseFailed('Please  verify your email using OTP'));
+            }
             if (password === deCryptedPassword) {
                 const payload = {
                     email: user_detail[0].email,
@@ -125,6 +128,13 @@ class LoginController extends BaseController {
             `, [email])
         if (user_data[0].otp == otp) {
             const [user_detail] = await dataBase.query("SELECT * FROM user WHERE email = ?", [email]);
+            //set otp verified = 1 ;
+            await dataBase.query(`
+                UPDATE user
+                SET otp_verified = 1
+                WHERE id = ?
+            `,[user_detail[0].id]);
+
             const payload = {
                 email: user_detail[0].email,
                 userId: user_detail[0].id,
