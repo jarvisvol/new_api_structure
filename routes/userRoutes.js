@@ -1,8 +1,24 @@
 var express = require('express');
 var router = express.Router();
+const multer = require('multer');
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, './private_csv')
+    },
+    filename: function (req, file, cb) {
+        cb(null, file.fieldname + '_user_name' + Math.floor(Math.random(0,1), 100000) + '.csv')
+    }
+})
+
+
+upload = multer({storage: storage})
+
+
 var LoginController = require('../controllers/LoginController.js');
+var CsvController = require('../controllers/CsvController.js');
 
 var login_controller = new LoginController();
+var csv_controller = new CsvController();
 
 
 router.post('/login', function(req, res, next) {
@@ -43,5 +59,9 @@ router.get('/check-token', async(req, res) => {
         res.status(401).send("you are not authorized fro this request");
     }
 })
+
+router.post('/csv-upload', upload.single('csv'),  (req, res) => {
+    csv_controller.csvFileupload(req, res);
+});
 
 module.exports = router;
