@@ -1,12 +1,14 @@
 var express = require('express');
 var router = express.Router();
 const multer = require('multer');
+var fileName;
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
         cb(null, './private_csv/')
     },
     filename: function (req, file, cb) {
-        cb(null, file.fieldname + '_user_name' + Math.floor(Math.random(0,1) * 100000) + '.csv')
+        fileName = file.fieldname + '_user_name' + Math.floor(Math.random(0,1) * 100000) + '.csv'
+        cb(null, fileName)
     }
 })
 
@@ -61,7 +63,7 @@ router.get('/check-token', async(req, res) => {
 })
 
 router.post('/csv-upload', upload.single("csv"),  (req, res) => {    
-    csv_controller.csvFileupload(req, res);
+    csv_controller.csvFileupload(req, res, fileName);
 });
 
 module.exports = router;
