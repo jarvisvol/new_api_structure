@@ -1,203 +1,347 @@
-const dataBase = require("../database/config");
-var CryptoJS = require("crypto-js");
-var jwt = require('jsonwebtoken');
-const messages = require("../public/messages/messages");
+const User = require('../models/User');
+const CryptoJS = require('crypto-js');
+const jwt = require('jsonwebtoken');
+const messages = require('../public/messages/messages');
 const BaseController = require('./BaseController');
 const MailSender = require('../mailer/mail');
 require('dotenv').config();
 
 class LoginController extends BaseController {
+  constructor() {
+    super();
+    this.MailSender = new MailSender();
+  }
 
-    constructor() {
-        super();
-        this.MailSender = new MailSender();
+  async login(req, res) {
+    try {
+      const { email, password } = req.body;
+      
+      // Find user with password selected
+      const user = await User.findOne({ email }).select('+password +otpVerified');
+      
+      if (!user) {
+        return res.status(400).send(this.responseFailed('Invalid email or password'));
+      }
+
+      // Check if email is verified
+      if (!user.otpVerified) {
+        return res.status(400).send(this.responseFailed('Please verify your email using OTP'));
+      }
+
+      // Check if user is active
+      if (!user.isActive) {
+        return res.status(400).send(this.responseFailed('Account is deactivated'));
+      }
+
+      // Compare password using bcrypt
+      const isPasswordValid = await user.comparePassword(password);
+      
+      // Alternative: If using CryptoJS encryption instead of bcrypt
+      // var bytes = CryptoJS.AES.decrypt(user.password, process.env.PASSWORD_KEY);
+      // var deCryptedPassword = bytes.toString(CryptoJS.enc.Utf8);
+      // const isPasswordValid = password === deCryptedPassword;
+
+      if (isPasswordValid) {
+        const payload = {
+          email: user.email,
+          userId: user._id,
+          phoneNumber: user.phoneNumber,
+          name: user.name
+        };
+        
+        const secret = process.env.JWT_TOKEN_KEY;
+        const token = jwt.sign(payload, secret, { expiresIn: '7d' });
+
+        // Store token in user document (simpler than separate collection)
+        user.accessToken = token;
+        await user.save({ validateBeforeSave: false });
+
+        return res.status(200).send(this.responseSuccess(messages.login_messages.login_success, { 
+          access_token: token,
+          user: {
+            id: user._id,
+            name: user.name,
+            email: user.email,
+            phoneNumber: user.phoneNumber
+          }
+        }));
+      } else {
+        return res.status(400).send(this.responseFailed('Invalid credentials'));
+      }
+    } catch (err) {
+      console.error('Login error:', err);
+      return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
+  }
 
-    async login(req, res) {
-        try {
-            const { email, password } = req.body;
-            const [user_detail] = await dataBase.query("SELECT * FROM user WHERE email = ?", [email]);
-            var user_password = user_detail[0].password
-            /// decryption 
-            var bytes = CryptoJS.AES.decrypt(user_password, process.env.PASSWORD_KEY);
-            var deCryptedPassword = bytes.toString(CryptoJS.enc.Utf8);
-            if(user_detail[0].otp_verified !== 1){
-                return res.status(400).send(this.responseFailed('Please  verify your email using OTP'));
-            }
-            if (password === deCryptedPassword) {
-                const payload = {
-                    email: user_detail[0].email,
-                    userId: user_detail[0].id,
-                    phoneNumber: user_detail[0].phone_number
-                }
-                const secret = process.env.JWT_TOKEN_KEY;
-                const token = jwt.sign(payload, secret);
-                var [check_user_loged_befor] = await dataBase.query('SELECT user_id FROM user_token WHERE user_id = ?', [user_detail[0].id]);
-                if (check_user_loged_befor[0]?.user_id) {
-                    await dataBase.query(`
-                        UPDATE user_token
-                        SET access_token = ?
-                        WHERE user_id = ?`, [token, user_detail[0].id]
-                    );
-                } else {
-                    await dataBase.query(`
-                        INSERT INTO user_token (user_id, access_token)
-                        VALUES (?, ?)`, [user_detail[0].id, token]
-                    );
-                }
-                return res.status(200).send(this.responseSuccess(messages.login_messages.login_success, { access_token: token }));
-            } else {
-                res.status(400).send(this.responseFailed('Invalid credentials'));
-            }
+  async registerUser(req, res) {
+    try {
+      const { name, email, phoneNumber, password, address, landType } = req.body;
+      
+      // Validate required fields
+      if (!name || !email || !phoneNumber || !password || !address || !landType) {
+        return res.status(400).send(this.responseFailed('All fields are required'));
+      }
 
-        } catch (err) {
-            if (err) throw err
-            res.status(500).send("Internal Server Error");
-        }
+      // Check if user already exists
+      const existingUser = await User.findOne({ 
+        $or: [{ email }, { phoneNumber }] 
+      });
+      
+      if (existingUser) {
+        return res.status(400).send(this.responseFailed('User already exists with this email or phone number'));
+      }
+
+      // Create user (password will be hashed by pre-save middleware)
+      const user = await User.create({
+        name,
+        email,
+        phoneNumber,
+        password, // Will be hashed by pre-save middleware
+        address,
+        landType
+        // OTP will be auto-generated by pre-save middleware
+      });
+
+      // Send OTP email
+      this.MailSender.mailToSomeone(email, user.otp);
+
+      return res.status(201).send(this.responseSuccess('User created successfully. Please verify OTP.', {
+        userId: user._id,
+        email: user.email,
+        name: user.name,
+        message: 'OTP sent to your email'
+      }));
+    } catch (err) {
+      console.error('Registration error:', err);
+      
+      // Handle validation errors
+      if (err.name === 'ValidationError') {
+        const errors = Object.values(err.errors).map(error => error.message);
+        return res.status(400).send(this.responseFailed(errors.join(', ')));
+      }
+      
+      // Handle duplicate key error
+      if (err.code === 11000) {
+        return res.status(400).send(this.responseFailed('Email or phone number already exists'));
+      }
+      
+      return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
+  }
 
-    async registerUser(req, res) {
-        var userDetails = req.body;
-        const { password } = req.body;
-        var encryptedPassword = CryptoJS.AES.encrypt(password, process.env.PASSWORD_KEY).toString();
-        var otp = Math.random(0, 1);
-        otp = Math.floor(otp * 100000);
-        this.MailSender.mailToSomeone(userDetails.email, otp);
-        const user_insert = await dataBase.query('INSERT INTO user (email, phone_number, password, name, otp) VALUES(?, ? ,?, ?, ?)', [userDetails.email, userDetails.phoneNumber, encryptedPassword, userDetails.name, otp]);
-        res.status(200).send({ messeage: "user created successfuly", userDetails: {...user_insert, email: userDetails.email} });
+  async getUserList(req, res) {
+    try {
+      const users = await User.find({})
+        .select('-password -otp -__v -accessToken')
+        .sort({ createdAt: -1 });
+      
+      return res.status(200).send(this.responseSuccess('User list retrieved successfully', users));
+    } catch (err) {
+      console.error('Get user list error:', err);
+      return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
+  }
 
-    async getUserList(req, res) {
-        var resp = await dataBase.query('SELECT * FROM user');
-        res.status(200).send({ messeage: "user list get successfuly", data: resp[0] });
+  async setPasscode(req, res) {
+    try {
+      const { user_id, pass_code } = req.body;
+      
+      // Check if user exists
+      const user = await User.findById(user_id).select('+passcode');
+      if (!user) {
+        return res.status(404).send(this.responseFailed('User not found'));
+      }
+
+      // Set or update passcode
+      user.passcode = pass_code;
+      await user.save({ validateBeforeSave: false });
+
+      return res.status(200).send(this.responseSuccess('Passcode set successfully'));
+    } catch (err) {
+      console.error('Set passcode error:', err);
+      return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
+  }
 
-    async setPasscode(req, res) {
-        var { user_id, pass_code } = req.body;
-        try {
-            const result = await dataBase.query(`
-                insert into user_passcode (user_id, passcode) values(?, ?)
-                `, [user_id, pass_code]);
-            res.status(201).send(this.responseSuccess('passcode created successfully', result))
-        } catch (error) {
-            res.send(error)
-        }
+  async checkPasscode(req, res) {
+    try {
+      const { user_id, pass_code } = req.body;
+      
+      const user = await User.findById(user_id).select('+passcode');
+      
+      if (!user) {
+        return res.status(404).send(this.responseFailed('User not found'));
+      }
+
+      if (!user.passcode) {
+        return res.status(400).send(this.responseFailed('Passcode not set for this user'));
+      }
+
+      if (user.passcode === pass_code) {
+        return res.status(200).send(this.responseSuccess('Passcode verified successfully'));
+      } else {
+        return res.status(400).send(this.responseFailed('Invalid passcode'));
+      }
+    } catch (err) {
+      console.error('Check passcode error:', err);
+      return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
+  }
 
-    async checkPasscode(req, res) {
-        var { user_id, pass_code } = req.body;
-        var [user_data] = await dataBase.query(`
-            select user_id, passcode
-            from user_passcode
-            where user_id = ?
-            `, [user_id]);
-        if (user_data[0].passcode == pass_code) {
-            res.status(200).send(this.responseSuccess('successfully loged in', 0))
-        } else {
-            res.status(400).send(this.responseFailed('something went wrong'));
-        }
+  async resendOtp(req, res) {
+    try {
+      const { email } = req.body;
+      
+      const user = await User.findOne({ email }).select('+otp +otpExpires');
+      
+      if (!user) {
+        return res.status(404).send(this.responseFailed('User not found'));
+      }
 
+      // Generate new OTP
+      const otp = user.generateOTP();
+      await user.save({ validateBeforeSave: false });
+
+      // Send OTP email
+      this.MailSender.mailToSomeone(email, otp);
+
+      return res.status(200).send(this.responseSuccess('OTP resent successfully'));
+    } catch (err) {
+      console.error('Resend OTP error:', err);
+      return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
+  }
 
-    async resendOtp(req, res) {
-        var { email } = req.body
-        var otp = Math.random(0, 1);
-        otp = Math.floor(otp * 100000);
-        this.MailSender.mailToSomeone(email, otp);
+  async checkOtp(req, res) {
+    try {
+      const { email, otp } = req.body;
+      
+      const user = await User.findOne({ email }).select('+otp +otpExpires +otpVerified');
+      
+      if (!user) {
+        return res.status(404).send(this.responseFailed('User not found'));
+      }
 
-        try {
-            var result = await dataBase.query(`
-                update user
-                set otp = ${otp}
-                where email = '${email}'`
-            );
-            res.status(200).send(this.responseSuccess('successfully resend the  otp', result))
-        } catch (error) {
-            console.log(error);
-            res.status(400).send(this.responseFailed('something went wrong'));
-        }
+      // Check OTP
+      if (user.isValidOTP(otp)) {
+        // Mark OTP as verified
+        user.otpVerified = true;
+        user.otp = undefined;
+        user.otpExpires = undefined;
+        user.isVerified = true;
+        await user.save({ validateBeforeSave: false });
 
+        // Generate JWT token
+        const payload = {
+          email: user.email,
+          userId: user._id,
+          phoneNumber: user.phoneNumber,
+          name: user.name
+        };
+        
+        const secret = process.env.JWT_TOKEN_KEY;
+        const token = jwt.sign(payload, secret, { expiresIn: '7d' });
+
+        // Store token
+        user.accessToken = token;
+        await user.save({ validateBeforeSave: false });
+
+        return res.status(200).send(this.responseSuccess('OTP verified successfully', {
+          accessToken: token,
+          user: {
+            id: user._id,
+            name: user.name,
+            email: user.email,
+            phoneNumber: user.phoneNumber
+          }
+        }));
+      } else {
+        return res.status(400).send(this.responseFailed('Invalid or expired OTP'));
+      }
+    } catch (err) {
+      console.error('Check OTP error:', err);
+      return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
+  }
 
-    async checkOtp(req, res) {
-        var { email, otp } = req.body;
-        const [user_data] = await dataBase.query(`
-            select *
-            from user
-            where email = ?
-            `, [email])
-        if (user_data[0].otp == otp) {
-            const [user_detail] = await dataBase.query("SELECT * FROM user WHERE email = ?", [email]);
-            //set otp verified = 1 ;
-            await dataBase.query(`
-                UPDATE user
-                SET otp_verified = 1
-                WHERE id = ?
-            `,[user_detail[0].id]);
-
-            const payload = {
-                email: user_detail[0].email,
-                userId: user_detail[0].id,
-                phoneNumber: user_detail[0].phone_number
-            }
-            const secret = process.env.JWT_TOKEN_KEY;
-            const token = jwt.sign(payload, secret);
-            var [check_user_loged_befor] = await dataBase.query('SELECT user_id FROM user_token WHERE user_id = ?', [user_detail[0].id]);
-                if (check_user_loged_befor[0]?.user_id) {
-                    await dataBase.query(`
-                        UPDATE user_token
-                        SET access_token = ?
-                        WHERE user_id = ?`, [token, user_detail[0].id]
-                    );
-                } else {
-                    await dataBase.query(`
-                        INSERT INTO user_token (user_id, access_token)
-                        VALUES (?, ?)`, [user_detail[0].id, token]
-                    );
-                }
-            res.status(200).send(this.responseSuccess('OTP verified successfully', {accessToken: token}))
-        } else {
-            res.status(400).send(this.responseFailed('something went wrong'));
-        }
-
+  async checkToken(token) {
+    try {
+      if (!token) return null;
+      
+      // Verify JWT token
+      const decoded = jwt.verify(token, process.env.JWT_TOKEN_KEY);
+      
+      // Find user with this token
+      const user = await User.findOne({ 
+        _id: decoded.userId,
+        accessToken: token,
+        isActive: true 
+      }).select('name email phoneNumber');
+      
+      if (!user) return null;
+      
+      return {
+        name: user.name,
+        email: user.email,
+        user_id: user._id,
+        phoneNumber: user.phoneNumber
+      };
+    } catch (err) {
+      console.error('Check token error:', err);
+      return null;
     }
+  }
 
-    async checkToken(token) {
-        try {
-            const [user] = await dataBase.query(`
-                select name, user_id, user.email
-                from user_token
-                left join user on user.id = user_token.user_id
-                where access_token = ?
-                `, [token]
-            )
-            return user;
-        } catch (error) {
-            return false;
-        }
+  async userDetail(req, res) {
+    try {
+      const token = req.headers.authorization?.replace('Bearer ', '') || 
+                    req.headers.accesstoken;
+      
+      if (!token) {
+        return res.status(401).send(this.responseFailed('Access token required'));
+      }
 
+      const userData = await this.checkToken(token);
+      
+      if (!userData) {
+        return res.status(401).send(this.responseFailed('Invalid or expired token'));
+      }
+
+      // Get full user details
+      const user = await User.findById(userData.user_id)
+        .select('-password -otp -__v -accessToken');
+      
+      return res.status(200).send(this.responseSuccess('User details retrieved successfully', user));
+    } catch (err) {
+      console.error('User detail error:', err);
+      return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
+  }
 
-    async userDetail(req, res) {
-        var token = req.headers;
-        token = token.accesstoken;
-        try {
-            const [result] = await dataBase.query(`
-                select user.id, name, email
-                from user_token
-                left join user on user.id = user_token.user_id
-                where access_token = ?
-                `, [token]
-            );
-            res.status(200).send(this.responseSuccess('successfully get', result[0]))
-        } catch (error) {            
-            res.status(401).send(this.responseFailed('Not Authorize'));
-        }
+  // Authentication middleware
+  async authenticateToken(req, res, next) {
+    try {
+      const token = req.headers.authorization?.replace('Bearer ', '') || 
+                    req.headers.accesstoken;
+      
+      if (!token) {
+        return res.status(401).send(this.responseFailed('Access token required'));
+      }
 
+      const userData = await this.checkToken(token);
+      
+      if (!userData) {
+        return res.status(401).send(this.responseFailed('Invalid or expired token'));
+      }
 
+      req.user = userData;
+      next();
+    } catch (err) {
+      console.error('Authentication error:', err);
+      return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
-
-
+  }
 }
 
 module.exports = LoginController;
