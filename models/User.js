@@ -17,6 +17,11 @@ const addressSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  country: {
+    type: String,
+    trim: true,
+    default: 'India'
+  },
   pincode: {
     type: String,
     trim: true,
@@ -90,7 +95,7 @@ const userSchema = new mongoose.Schema({
   password: {
     type: String,
     required: [true, 'Password is required'],
-    minlength: 6,
+    minlength: [6, 'Password must be at least 6 characters long'],
     select: false
   },
 
@@ -122,58 +127,100 @@ const userSchema = new mongoose.Schema({
   passcode: {
     type: String,
     select: false
+  },
+
+  // Token field for JWT storage
+  accessToken: {
+    type: String,
+    select: false
+  },
+
+  // Additional fields you might need
+  profileImage: {
+    type: String,
+    default: ''
+  },
+  
+  role: {
+    type: String,
+    enum: ['user', 'admin', 'farmer', 'agent'],
+    default: 'user'
+  },
+  
+  lastLogin: {
+    type: Date
   }
 }, {
   timestamps: true,
-  toJSON: { virtuals: true },
-  toObject: { virtuals: true }
+  toJSON: {
+    virtuals: true,
+    transform: function(doc, ret) {
+      // Remove sensitive fields when converting to JSON
+      delete ret.password;
+      delete ret.otp;
+      delete ret.otpExpires;
+      delete ret.passcode;
+      delete ret.accessToken;
+      delete ret.__v;
+      return ret;
+    }
+  },
+  toObject: {
+    virtuals: true
+  }
 });
 
-// REMOVED duplicate index definitions - Mongoose automatically creates indexes for unique: true
-// userSchema.index({ email: 1 }); // REMOVE THIS LINE - duplicate
-// userSchema.index({ phoneNumber: 1 }); // REMOVE THIS LINE - duplicate
+// ========== MIDDLEWARE ==========
 
-// Keep these non-unique indexes
-userSchema.index({ 'address.city': 1 });
-userSchema.index({ landType: 1 });
-userSchema.index({ createdAt: -1 });
-userSchema.index({ otpVerified: 1 });
-userSchema.index({ isActive: 1 });
-
-// Pre-save middleware for password hashing
+// Pre-save middleware for password hashing and OTP generation
 userSchema.pre('save', async function(next) {
-  // Only hash the password if it's modified (or new)
-  if (!this.isModified('password')) return next();
-  
   try {
-    // If password is already encrypted with CryptoJS, skip bcrypt
-    // Or use bcrypt if you're starting fresh
-    const salt = await bcrypt.genSalt(10);
-    this.password = await bcrypt.hash(this.password, salt);
+    // 1. Hash password if modified
+    if (this.isModified('password')) {
+      const salt = await bcrypt.genSalt(10);
+      this.password = await bcrypt.hash(this.password, salt);
+    }
+    
+    // 2. Generate OTP for new users
+    if (this.isNew && !this.otp) {
+      this.otp = Math.floor(100000 + Math.random() * 900000).toString();
+      this.otpExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
+    }
+    
     next();
   } catch (error) {
     next(error);
   }
 });
 
-// Pre-save middleware for OTP generation on new user
-userSchema.pre('save', function(next) {
-  if (this.isNew && !this.otp) {
-    this.otp = Math.floor(100000 + Math.random() * 900000).toString();
-    this.otpExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
-  }
+// Post-save middleware (optional - for logging)
+userSchema.post('save', function(doc, next) {
+  console.log(`✅ User ${doc.email} saved successfully`);
   next();
 });
 
-// Instance methods
+// ========== INDEXES ==========
+userSchema.index({ 'address.city': 1 });
+userSchema.index({ landType: 1 });
+userSchema.index({ createdAt: -1 });
+userSchema.index({ otpVerified: 1 });
+userSchema.index({ isActive: 1 });
+userSchema.index({ role: 1 });
+userSchema.index({ email: 'text', name: 'text' }); // Text search index
+
+// ========== INSTANCE METHODS ==========
+
+// Compare password
 userSchema.methods.comparePassword = async function(candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
+// Check if OTP is valid
 userSchema.methods.isValidOTP = function(inputOtp) {
   return this.otp === inputOtp && this.otpExpires > Date.now();
 };
 
+// Generate new OTP
 userSchema.methods.generateOTP = function() {
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   this.otp = otp;
@@ -181,30 +228,140 @@ userSchema.methods.generateOTP = function() {
   return otp;
 };
 
+// Get full address
 userSchema.methods.getFullAddress = function() {
   const addr = this.address;
-  return `${addr.street ? addr.street + ', ' : ''}${addr.city}, ${addr.state ? addr.state + ', ' : ''}${addr.pincode}`.trim();
+  const parts = [];
+  
+  if (addr.street) parts.push(addr.street);
+  if (addr.city) parts.push(addr.city);
+  if (addr.state) parts.push(addr.state);
+  if (addr.country) parts.push(addr.country);
+  if (addr.pincode) parts.push(`PIN: ${addr.pincode}`);
+  
+  return parts.join(', ');
 };
 
-// Virtual properties
+// Update last login
+userSchema.methods.updateLastLogin = function() {
+  this.lastLogin = new Date();
+  return this.save({ validateBeforeSave: false });
+};
+
+// Reset password (if needed)
+userSchema.methods.resetPassword = async function(newPassword) {
+  this.password = newPassword;
+  this.otp = undefined;
+  this.otpExpires = undefined;
+  return await this.save();
+};
+
+// ========== VIRTUAL PROPERTIES ==========
+
+// Formatted phone number
 userSchema.virtual('formattedPhone').get(function() {
   const phone = this.phoneNumber;
-  return phone ? `+91 ${phone.substring(0, 5)} ${phone.substring(5)}` : '';
+  if (!phone) return '';
+  return `+91 ${phone.substring(0, 5)} ${phone.substring(5)}`;
 });
 
+// User status
 userSchema.virtual('status').get(function() {
   if (!this.isActive) return 'Inactive';
-  return this.isVerified ? 'Verified' : 'Pending Verification';
+  if (!this.otpVerified) return 'Pending Verification';
+  return 'Active';
 });
 
-// Static methods
+// Short address (city, state)
+userSchema.virtual('shortAddress').get(function() {
+  const addr = this.address;
+  return `${addr.city}, ${addr.state}`;
+});
+
+// User age (if you had dob field)
+userSchema.virtual('age').get(function() {
+  if (!this.dob) return null;
+  const today = new Date();
+  const birthDate = new Date(this.dob);
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  return age;
+});
+
+// ========== STATIC METHODS ==========
+
+// Find by land type
 userSchema.statics.findByLandType = function(landType) {
-  return this.find({ landType });
+  return this.find({ landType, isActive: true });
 };
 
+// Find by city
 userSchema.statics.findByCity = function(city) {
-  return this.find({ 'address.city': city });
+  return this.find({ 'address.city': new RegExp(city, 'i'), isActive: true });
+};
+
+// Find verified users
+userSchema.statics.findVerified = function() {
+  return this.find({ otpVerified: true, isActive: true });
+};
+
+// Search users
+userSchema.statics.search = function(query) {
+  return this.find({
+    $or: [
+      { name: new RegExp(query, 'i') },
+      { email: new RegExp(query, 'i') },
+      { phoneNumber: new RegExp(query, 'i') },
+      { 'address.city': new RegExp(query, 'i') }
+    ],
+    isActive: true
+  });
+};
+
+// Get user statistics
+userSchema.statics.getStats = async function() {
+  const total = await this.countDocuments();
+  const verified = await this.countDocuments({ otpVerified: true });
+  const active = await this.countDocuments({ isActive: true });
+  const byLandType = await this.aggregate([
+    { $group: { _id: '$landType', count: { $sum: 1 } } },
+    { $sort: { count: -1 } }
+  ]);
+  
+  return {
+    total,
+    verified,
+    active,
+    byLandType,
+    pendingVerification: total - verified
+  };
+};
+
+// Find by token
+userSchema.statics.findByToken = function(token) {
+  return this.findOne({ accessToken: token, isActive: true });
+};
+
+// ========== QUERY HELPERS ==========
+
+// Query helper for active users
+userSchema.query.active = function() {
+  return this.where({ isActive: true });
+};
+
+// Query helper for verified users
+userSchema.query.verified = function() {
+  return this.where({ otpVerified: true });
+};
+
+// Query helper for land type
+userSchema.query.byLandType = function(landType) {
+  return this.where({ landType });
 };
 
 const User = mongoose.model('User', userSchema);
+
 module.exports = User;
