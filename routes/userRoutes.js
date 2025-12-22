@@ -2,48 +2,22 @@ var express = require('express');
 var router = express.Router();
 
 
-var LoginController = require('../controllers/LoginController.js');
+var UserController = require('../controllers/UserController.js');
 
-var login_controller = new LoginController();
+var user_controller = new UserController();
 
 
-router.post('/login', function(req, res, next) {
-    login_controller.login(req, res, next);
-});
+// Public routes
+router.post('/login', (req, res) => user_controller.login(req, res));
+router.post('/register', (req, res) => user_controller.registerUser(req, res));
+router.post('/verify-otp', (req, res) => user_controller.verifyOtp(req, res));
+router.post('/resend-otp', (req, res) => user_controller.resendOtp(req, res));
 
-router.post('/register', function(req, res) {
-    login_controller.registerUser(req, res);
-});
-
-router.get('/list', (req, res) => {
-    login_controller.getUserList(req, res);
-})
-
-router.post('/check-otp', (req, res) => {
-    login_controller.checkOtp(req, res);
-})
-
-router.post('/resend-otp', (req, res) => {
-    login_controller.resendOtp(req, res);
-})
-
-router.get('/user-detail', (req, res) => {
-    login_controller.userDetail(req, res);
-})
-
-router.get('/check-token', async(req, res) => {
-    var token = req.headers;
-    token = token.accesstoken
-    const result = await login_controller.checkToken(token);
-    if(result[0]?.user_id){
-        req.body = {
-            ...req.body,
-            userDetails: result[0]
-        };
-        res.status(200).send("token veryfied");
-    } else {
-        res.status(401).send("you are not authorized fro this request");
-    }
-})
+// Protected routes
+router.post('/logout', (req, res) => user_controller.logout(req, res));
+router.get('/profile', (req, res) => user_controller.getUserProfile(req, res));
+router.get('/detail', (req, res) => user_controller.userDetail(req, res));
+router.get('/users', (req, res, next) => user_controller.authenticate(req, res, next), 
+  (req, res) => user_controller.getUserList(req, res));
 
 module.exports = router;
