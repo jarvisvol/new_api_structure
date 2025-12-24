@@ -17,7 +17,7 @@ const propertySchema = new mongoose.Schema({
     currency: { type: String, default: 'INR' },
     priceType: { 
       type: String, 
-      enum: ['sale', 'rent'],
+      enum: ['sale', 'rent', 'lease'],
       required: true 
     },
     pricePerSquareUnit: { type: Number }
@@ -55,6 +55,14 @@ const propertySchema = new mongoose.Schema({
         enum: ['sqft', 'sqmt', 'acre'],
         default: 'sqft'
       }
+    },
+    builtUpArea: {
+      value: { type: Number },
+      unit: { 
+        type: String, 
+        enum: ['sqft', 'sqmt'],
+        default: 'sqft'
+      }
     }
   },
   createdAt: { type: Date, default: Date.now },
@@ -73,7 +81,8 @@ function arrayLimit(val) {
 // Indexes for better query performance
 propertySchema.index({ 'propertyAddress.city': 1 });
 propertySchema.index({ 'price.amount': 1 });
-propertySchema.index({ 'propertyDetails.propertyType': 1 });
-propertySchema.index({ status: 1 });
+propertySchema.index({ 'propertyAddress.state': 1 });
+propertySchema.index({ 'createdBy': 1 });
+propertySchema.index({ 'price.priceType': 1 });
 
 module.exports = mongoose.model('Property', propertySchema);

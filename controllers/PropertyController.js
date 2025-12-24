@@ -11,86 +11,124 @@ class PropertyController extends BaseController {
   // 1. CREATE - Add new property
   async createProperty(req, res) {
     try {
-      const {
-        propertyAddress,
-        price,
-        distanceFromTransport,
-        images,
-        dimensions
-      } = req.body;
+      const { property: propertyJson } = req.body;
+      let propertyData;
+      try {
+        propertyData = JSON.parse(propertyJson); // Use propertyJson instead of property
+      } catch (parseError) {
+        return res.status(400).send(this.responseFailed('Invalid property data format'));
+      }
 
-      console.log('🏠 Creating new property for user:', req.user?.user_id);
+      const {
+        streetAddress,
+        city,
+        state,
+        zipCode,
+        country,
+        currency,
+        amount,
+        priceType,
+        pricePerSquareUnit,
+        plotArea,
+        builtUpArea,
+        nearestStationName,
+        railwayDistance,
+        nearestBusStandName,
+        busDistance,
+        createdBy
+      } = propertyData;
 
       // Basic validation
-      if (!propertyAddress || !price || !distanceFromTransport || !dimensions) {
+      if (!streetAddress || !city || !state || !zipCode || !country ||
+        !amount || !priceType || !plotArea || !nearestStationName ||
+        !railwayDistance || !nearestBusStandName || !busDistance) {
         return res.status(400).send(this.responseFailed('Required fields are missing'));
       }
 
-      // Validate property address has required fields
-      if (!propertyAddress.streetAddress || !propertyAddress.city || 
-          !propertyAddress.state || !propertyAddress.zipCode) {
-        return res.status(400).send(this.responseFailed('Property address is incomplete'));
+      // Validate numeric fields
+      if (isNaN(amount) || amount <= 0) {
+        return res.status(400).send(this.responseFailed('Invalid price amount'));
       }
 
-      // Validate price
-      if (!price.amount || !price.priceType) {
-        return res.status(400).send(this.responseFailed('Price information is incomplete'));
+      if (isNaN(plotArea) || plotArea <= 0) {
+        return res.status(400).send(this.responseFailed('Invalid plot area'));
       }
 
-      // Validate distance from transport
-      if (!distanceFromTransport.railwayStation || !distanceFromTransport.busStand) {
-        return res.status(400).send(this.responseFailed('Transport distance information is incomplete'));
+      if (isNaN(railwayDistance) || railwayDistance < 0) {
+        return res.status(400).send(this.responseFailed('Invalid railway distance'));
       }
 
-      // Validate railway station
-      if (!distanceFromTransport.railwayStation.distance || 
-          !distanceFromTransport.railwayStation.nearestStationName) {
-        return res.status(400).send(this.responseFailed('Railway station information is incomplete'));
+      if (isNaN(busDistance) || busDistance < 0) {
+        return res.status(400).send(this.responseFailed('Invalid bus distance'));
       }
 
-      // Validate bus stand
-      if (!distanceFromTransport.busStand.distance || 
-          !distanceFromTransport.busStand.nearestBusStandName) {
-        return res.status(400).send(this.responseFailed('Bus stand information is incomplete'));
+      // Validate price type
+      if (!['sale', 'rent'].includes(priceType)) {
+        return res.status(400).send(this.responseFailed('Invalid price type'));
       }
 
-      // Validate dimensions
-      if (!dimensions.plotArea || !dimensions.plotArea.value) {
-        return res.status(400).send(this.responseFailed('Plot area information is required'));
-      }
+      // Process images from FormData (if any)
 
-      // Validate images (max 5)
-      if (images && images.length > 5) {
-        return res.status(400).send(this.responseFailed('Maximum 5 images allowed'));
-      }
-
-      // Create property with user info
-      const propertyData = {
-        ...req.body,
-        createdBy: req.user?.user_id,
-        lastUpdatedBy: req.user?.user_id
+      // Structure the data according to your schema
+      const structuredPropertyData = {
+        propertyAddress: {
+          streetAddress,
+          city,
+          state,
+          zipCode,
+          country
+        },
+        price: {
+          amount: parseFloat(amount),
+          currency: currency || 'INR',
+          priceType,
+          pricePerSquareUnit: pricePerSquareUnit ? parseFloat(pricePerSquareUnit) : undefined
+        },
+        distanceFromTransport: {
+          railwayStation: {
+            distance: parseFloat(railwayDistance),
+            unit: 'km',
+            nearestStationName
+          },
+          busStand: {
+            distance: parseFloat(busDistance),
+            unit: 'km',
+            nearestBusStandName
+          }
+        },
+        dimensions: {
+          plotArea: {
+            value: parseFloat(plotArea),
+            unit: 'sqft'
+          }
+        },
+        createdBy: req.user?.user_id || createdBy,
+        lastUpdatedBy: req.user?.user_id || createdBy
       };
 
-      const property = await Property.create(propertyData);
-
-      console.log('✅ Property created successfully:', property._id);
+      // Add builtUpArea if provided
+      if (builtUpArea && !isNaN(builtUpArea) && builtUpArea > 0) {
+        structuredPropertyData.dimensions.builtUpArea = {
+          value: parseFloat(builtUpArea),
+          unit: 'sqft'
+        };
+      }
+      // Create and save the new property
+      const newProperty = await Property.create(structuredPropertyData);
 
       return res.status(201).send(this.responseSuccess('Property created successfully', {
-        propertyId: property._id,
-        address: property.propertyAddress,
-        price: property.price,
+        propertyId: newProperty._id,
+        address: `${newProperty.propertyAddress.streetAddress}, ${newProperty.propertyAddress.city}`,
+        price: newProperty.price.amount,
+        currency: newProperty.price.currency,
         message: 'Property listed successfully'
       }));
     } catch (err) {
-      console.error('❌ Create property error:', err);
-
-      // Handle validation errors
       if (err.name === 'ValidationError') {
         const errors = Object.values(err.errors).map(error => error.message);
         return res.status(400).send(this.responseFailed(errors.join(', ')));
       }
 
-      // Handle duplicate key error
       if (err.code === 11000) {
         return res.status(400).send(this.responseFailed('Property already exists'));
       }

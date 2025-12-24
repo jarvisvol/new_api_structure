@@ -16,21 +16,6 @@ router.get('/price/:min/:max', propertyController.getPropertiesByPriceRange.bind
 router.get('/near-railway/:distance', propertyController.getPropertiesNearRailway.bind(propertyController));
 router.get('/:id', propertyController.getPropertyById.bind(propertyController));
 
-// Protected routes (require authentication)
-router.post('/', 
-  userController.authenticate.bind(userController),
-  propertyController.createProperty.bind(propertyController)
-);
-
-router.put('/:id', 
-  userController.authenticate.bind(userController),
-  propertyController.updateProperty.bind(propertyController)
-);
-
-router.delete('/:id', 
-  userController.authenticate.bind(userController),
-  propertyController.deleteProperty.bind(propertyController)
-);
 
 router.get('/my/properties', 
   userController.authenticate.bind(userController),

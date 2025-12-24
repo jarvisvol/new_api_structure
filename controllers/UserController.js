@@ -14,8 +14,8 @@ class UserController extends BaseController {
 
   async registerUser(req, res) {
     try {
-      const { name, email, phoneNumber, password, address, landType } = req.body;
-      
+      const { name, email, phoneNumber, password, address, landType, role_type } = req.body;
+
       // Basic validation
       if (!name || !email || !phoneNumber || !password || !address || !landType) {
         return res.status(400).send(this.responseFailed('All fields are required'));
@@ -27,10 +27,10 @@ class UserController extends BaseController {
       }
 
       // Check if user already exists
-      const existingUser = await User.findOne({ 
-        $or: [{ email }, { phoneNumber }] 
+      const existingUser = await User.findOne({
+        $or: [{ email }, { phoneNumber }]
       });
-      
+
       if (existingUser) {
         return res.status(400).send(this.responseFailed('User already exists with this email or phone number'));
       }
@@ -38,7 +38,7 @@ class UserController extends BaseController {
       // Hash password
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(password, salt);
-      
+
       // Generate OTP
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
       const otpExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
@@ -55,7 +55,7 @@ class UserController extends BaseController {
         otpExpires,
         otpVerified: false,
         isActive: true,
-        role: 'user'
+        role: (role_type && ['user', 'admin', 'agent'].includes(role_type)) ? role_type : 'user'
       });
 
 
@@ -70,19 +70,19 @@ class UserController extends BaseController {
         otp: otp // For testing - remove in production
       }));
     } catch (err) {
-      
+
       // Handle validation errors
       if (err.name === 'ValidationError') {
         const errors = Object.values(err.errors).map(error => error.message);
         return res.status(400).send(this.responseFailed(errors.join(', ')));
       }
-      
+
       // Handle duplicate key error
       if (err.code === 11000) {
         const field = err.message.includes('email') ? 'Email' : 'Phone number';
         return res.status(400).send(this.responseFailed(`${field} already exists`));
       }
-      
+
       return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
   }
@@ -90,12 +90,12 @@ class UserController extends BaseController {
   async login(req, res) {
     try {
       const { email, password } = req.body;
-      
+
       console.log('🔑 Login attempt for:', email);
-      
+
       // Find user with password selected
       const user = await User.findOne({ email }).select('+password +otpVerified +isActive');
-      
+
       if (!user) {
         console.log('❌ User not found');
         return res.status(400).send(this.responseFailed('Invalid email or password'));
@@ -145,7 +145,7 @@ class UserController extends BaseController {
         try {
           // Check if user already has a token
           const existingToken = await UserToken.findOne({ user: user._id });
-          
+
           if (existingToken) {
             // Update existing token
             existingToken.accessToken = token;
@@ -191,13 +191,13 @@ class UserController extends BaseController {
   async checkToken(token) {
     try {
       if (!token) return null;
-      
+
       console.log('🔍 Checking token...');
-      
+
       // First, try to find in UserToken collection
       const userToken = await UserToken.findOne({ accessToken: token })
         .populate('user', 'name email phoneNumber role');
-      
+
       if (userToken && userToken.user) {
         console.log('✅ Token found in UserToken collection');
         return {
@@ -208,17 +208,17 @@ class UserController extends BaseController {
           role: userToken.user.role
         };
       }
-      
+
       // If not found in UserToken, try to verify JWT and find in User model
       console.log('⚠️ Token not found in UserToken, checking User model...');
       const decoded = jwt.verify(token, process.env.JWT_TOKEN_KEY);
-      
-      const user = await User.findOne({ 
+
+      const user = await User.findOne({
         _id: decoded.userId,
         accessToken: token,
-        isActive: true 
+        isActive: true
       });
-      
+
       if (user) {
         console.log('✅ Token found in User model');
         return {
@@ -229,10 +229,10 @@ class UserController extends BaseController {
           role: user.role
         };
       }
-      
+
       console.log('❌ Token not found in any collection');
       return null;
-      
+
     } catch (err) {
       console.error('❌ Check token error:', err.message);
       return null;
@@ -241,9 +241,9 @@ class UserController extends BaseController {
 
   async logout(req, res) {
     try {
-      const token = req.headers.authorization?.replace('Bearer ', '') || 
-                    req.headers.accesstoken;
-      
+      const token = req.headers.authorization?.replace('Bearer ', '') ||
+        req.headers.accesstoken;
+
       if (!token) {
         return res.status(401).send(this.responseFailed('Access token required'));
       }
@@ -273,9 +273,9 @@ class UserController extends BaseController {
 
   async userDetail(req, res) {
     try {
-      const token = req.headers.authorization?.replace('Bearer ', '') || 
-                    req.headers.accesstoken;
-      
+      const token = req.headers.authorization?.replace('Bearer ', '') ||
+        req.headers.accesstoken;
+
       if (!token) {
         return res.status(401).send(this.responseFailed('Access token required'));
       }
@@ -283,14 +283,14 @@ class UserController extends BaseController {
       console.log('🔍 Getting user details for token');
 
       const userData = await this.checkToken(token);
-      
+
       if (!userData) {
         return res.status(401).send(this.responseFailed('Invalid or expired token'));
       }
 
       // Get full user details
       const user = await User.findById(userData.user_id);
-      
+
       if (!user) {
         return res.status(404).send(this.responseFailed('User not found'));
       }
@@ -307,23 +307,23 @@ class UserController extends BaseController {
   // Update other methods to use checkToken
   async getUserProfile(req, res) {
     try {
-      
-      const token = req.headers.authorization?.replace('Bearer ', '') || 
-                    req.headers.accesstoken;
-      
+
+      const token = req.headers.authorization?.replace('Bearer ', '') ||
+        req.headers.accesstoken;
+
       if (!token) {
         return res.status(401).send(this.responseFailed('Access token required'));
       }
 
       const userData = await this.checkToken(token);
-      
+
       if (!userData) {
         return res.status(401).send(this.responseFailed('Invalid token'));
       }
 
       // Find user by ID
       const user = await User.findById(userData.user_id);
-      
+
       if (!user) {
         return res.status(404).send(this.responseFailed('User not found'));
       }
@@ -338,15 +338,15 @@ class UserController extends BaseController {
   // Authentication middleware
   async authenticate(req, res, next) {
     try {
-      const token = req.headers.authorization?.replace('Bearer ', '') || 
-                    req.headers.accesstoken;
-      
+      const token = req.headers.authorization?.replace('Bearer ', '') ||
+        req.headers.accesstoken;
+
       if (!token) {
         return res.status(401).send(this.responseFailed('Access token required'));
       }
 
       const userData = await this.checkToken(token);
-      
+
       if (!userData) {
         return res.status(401).send(this.responseFailed('Invalid or expired token'));
       }
@@ -354,7 +354,90 @@ class UserController extends BaseController {
       req.user = userData;
       next();
     } catch (err) {
-      console.error('❌ Authentication error:', err);
+      return res.status(500).send(this.responseFailed('Internal Server Error'));
+    }
+  }
+
+  // Admin and Agent authentication middleware
+  async authenticateAdminAgent(req, res, next) {
+    try {
+      const token = req.headers.authorization?.replace('Bearer ', '') ||
+        req.headers.accesstoken;
+
+      if (!token) {
+        return res.status(401).send(this.responseFailed('Access token required'));
+      }
+
+      const userData = await this.checkToken(token);
+
+      if (!userData) {
+        return res.status(401).send(this.responseFailed('Invalid or expired token'));
+      }
+
+      // Check if user has admin or agent role
+      if (!['admin', 'agent'].includes(userData.role)) {
+        return res.status(403).send(this.responseFailed('Access denied. Admin or Agent privileges required'));
+      }
+
+      req.user = userData;
+      next();
+    } catch (err) {
+      return res.status(500).send(this.responseFailed('Internal Server Error'));
+    }
+  }
+
+  // Admin only authentication middleware
+  async authenticateAdminOnly(req, res, next) {
+    try {
+      const token = req.headers.authorization?.replace('Bearer ', '') ||
+        req.headers.accesstoken;
+
+      if (!token) {
+        return res.status(401).send(this.responseFailed('Access token required'));
+      }
+
+      const userData = await this.checkToken(token);
+
+      if (!userData) {
+        return res.status(401).send(this.responseFailed('Invalid or expired token'));
+      }
+
+      // Check if user has admin role only
+      if (userData.role !== 'admin') {
+        return res.status(403).send(this.responseFailed('Access denied. Admin privileges required'));
+      }
+
+      req.user = userData;
+      next();
+    } catch (err) {
+      return res.status(500).send(this.responseFailed('Internal Server Error'));
+    }
+  }
+
+  // Agent only authentication middleware
+  async authenticateAgentOnly(req, res, next) {
+    try {
+      const token = req.headers.authorization?.replace('Bearer ', '') ||
+        req.headers.accesstoken;
+
+      if (!token) {
+        return res.status(401).send(this.responseFailed('Access token required'));
+      }
+
+      const userData = await this.checkToken(token);
+
+      if (!userData) {
+        return res.status(401).send(this.responseFailed('Invalid or expired token'));
+      }
+
+      // Check if user has agent role only
+      if (userData.role !== 'agent') {
+        return res.status(403).send(this.responseFailed('Access denied. Agent privileges required'));
+      }
+
+      req.user = userData;
+      next();
+    } catch (err) {
       return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
   }
