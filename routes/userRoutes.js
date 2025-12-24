@@ -17,7 +17,6 @@ router.post('/resend-otp', (req, res) => user_controller.resendOtp(req, res));
 router.post('/logout', (req, res) => user_controller.logout(req, res));
 router.get('/profile', (req, res) => user_controller.getUserProfile(req, res));
 router.get('/detail', (req, res) => user_controller.userDetail(req, res));
-router.get('/users', (req, res, next) => user_controller.authenticate(req, res, next), 
-  (req, res) => user_controller.getUserList(req, res));
+
 
 module.exports = router;
