@@ -9,7 +9,7 @@ require('./database/config');
 //routes imports
 var userRoutes = require('./routes/userRoutes.js');
 var propertyRoutes = require('./routes/propertyRoutes');
-var propertyAdminRoutes = require('./routes/propertyAdminRoutes');
+var adminRoutes = require('./routes/adminRoutes');
 
 
 const cors = require('cors');
@@ -29,7 +29,7 @@ app.use(cors())
 
 app.use('/api/user', userRoutes);
 app.use('/api/properties', propertyRoutes);
-app.use('/api/admin', propertyAdminRoutes);
+app.use('/api/admin', adminRoutes);
 
 // catch 404 and forward to error handler
 app.use(function(req, res, next) {

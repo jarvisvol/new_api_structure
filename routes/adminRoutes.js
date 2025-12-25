@@ -11,23 +11,40 @@ router.get('/properties',
   propertyController.getAllProperties.bind(propertyController)
 );
 
-router.post('/properties', 
+router.post('/properties',
   userController.authenticateAdminAgent.bind(userController),
   propertyController.createProperty.bind(propertyController)
 );
 
-router.put('/properties/:id', 
+router.put('/properties/:id',
   userController.authenticateAdminAgent.bind(userController),
   propertyController.updateProperty.bind(propertyController)
 );
 
-router.delete('/properties/:id', 
+router.delete('/properties/:id',
   userController.authenticateAdminAgent.bind(userController),
   propertyController.deleteProperty.bind(propertyController)
 );
 
-router.get('/users', (req, res, next) => userController.authenticateAdminAgent(req, res, next), 
-  (req, res) => userController.getUserList(req, res));
+router.post('/users', (req, res, next) => userController.authenticateAdminAgent(req, res, next),
+  (req, res) => userController.registerUser(req, res));
+
+router.get('/user/:id', 
+  (req, res, next) => userController.authenticateAdminAgent(req, res, next),
+  (req, res) => userController.getUserProfile(req, res)
+);
+
+router.put('/user/:id', 
+  (req, res, next) => userController.authenticateAdminOnly(req, res, next),
+  (req, res) => userController.updateUserRole(req, res)
+);
+
+router.get('/users', 
+  (req, res, next) => userController.authenticateAdminAgent(req, res, next),
+  (req, res) => userController.getAllUsers(req, res)
+);
+
+
 
 
 module.exports = router;

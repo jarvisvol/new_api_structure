@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const BaseController = require('./BaseController');
 const MailSender = require('../mailer/mail');
+const mongoose = require('mongoose');
 require('dotenv').config();
 
 class UserController extends BaseController {
@@ -14,7 +15,7 @@ class UserController extends BaseController {
 
   async registerUser(req, res) {
     try {
-      const { name, email, phoneNumber, password, address, landType, role_type } = req.body;
+      const { name, email, phoneNumber, password, address, isVerified, landType, role_type } = req.body;
 
       // Basic validation
       if (!name || !email || !phoneNumber || !password || !address || !landType) {
@@ -53,7 +54,8 @@ class UserController extends BaseController {
         landType,
         otp,
         otpExpires,
-        otpVerified: false,
+        otpVerified: isVerified ? true : false,
+        isVerified: isVerified ? true : false,
         isActive: true,
         role: (role_type && ['user', 'admin', 'agent'].includes(role_type)) ? role_type : 'user'
       });
@@ -67,7 +69,6 @@ class UserController extends BaseController {
         email: user.email,
         name: user.name,
         message: 'OTP sent to your email',
-        otp: otp // For testing - remove in production
       }));
     } catch (err) {
 
@@ -307,22 +308,8 @@ class UserController extends BaseController {
   // Update other methods to use checkToken
   async getUserProfile(req, res) {
     try {
-
-      const token = req.headers.authorization?.replace('Bearer ', '') ||
-        req.headers.accesstoken;
-
-      if (!token) {
-        return res.status(401).send(this.responseFailed('Access token required'));
-      }
-
-      const userData = await this.checkToken(token);
-
-      if (!userData) {
-        return res.status(401).send(this.responseFailed('Invalid token'));
-      }
-
-      // Find user by ID
-      const user = await User.findById(userData.user_id);
+      const { id } = req.params
+      const user = await User.findById(id);
 
       if (!user) {
         return res.status(404).send(this.responseFailed('User not found'));
@@ -330,7 +317,6 @@ class UserController extends BaseController {
 
       return res.status(200).send(this.responseSuccess('Profile retrieved successfully', user));
     } catch (err) {
-      console.error('❌ Get profile error:', err);
       return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
   }
@@ -383,6 +369,255 @@ class UserController extends BaseController {
       next();
     } catch (err) {
       return res.status(500).send(this.responseFailed('Internal Server Error'));
+    }
+  }
+
+  /**
+   * Fetch all users with pagination (Admin only)
+   * GET /api/users
+   */
+  async getAllUsers(req, res) {
+    try {
+      // Get query parameters with defaults
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || parseInt(process.env.RECORDS_PER_PAGE) || 10;
+      const search = req.query.search || '';
+      const role = req.query.role || '';
+      const isActive = req.query.isActive;
+      const isVerified = req.query.isVerified;
+      const sortBy = req.query.sortBy || 'createdAt';
+      const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
+
+      // Calculate skip value for pagination
+      const skip = (page - 1) * limit;
+
+      // Build filter object
+      const filter = {};
+
+      // Search filter
+      if (search) {
+        filter.$or = [
+          { name: { $regex: search, $options: 'i' } },
+          { email: { $regex: search, $options: 'i' } },
+          { phoneNumber: { $regex: search, $options: 'i' } },
+          { 'address.city': { $regex: search, $options: 'i' } },
+          { 'address.state': { $regex: search, $options: 'i' } }
+        ];
+      }
+
+      // Role filter
+      if (role) {
+        filter.role = role;
+      }
+
+      // Boolean filters
+      if (isActive !== undefined) {
+        filter.isActive = isActive === 'true';
+      }
+
+      if (isVerified !== undefined) {
+        filter.isVerified = isVerified === 'true';
+      }
+
+      // Build sort object
+      const sort = {};
+      sort[sortBy] = sortOrder;
+
+      // Execute queries
+      const [users, total] = await Promise.all([
+        User.find(filter)
+          .select('-password -otp -otpExpires -passcode -accessToken -__v')
+          .sort(sort)
+          .skip(skip)
+          .limit(limit)
+          .lean(),
+        User.countDocuments(filter)
+      ]);
+
+      // Calculate total pages
+      const totalPages = Math.ceil(total / limit);
+      const hasNextPage = page < totalPages;
+      const hasPrevPage = page > 1;
+
+      return res.status(200).send({
+        status: 'success',
+        message: 'Users retrieved successfully',
+        data: {
+          users,
+          pagination: {
+            total,
+            totalPages,
+            currentPage: page,
+            limit,
+            hasNextPage,
+            hasPrevPage,
+            nextPage: hasNextPage ? page + 1 : null,
+            prevPage: hasPrevPage ? page - 1 : null
+          }
+        }
+      });
+
+    } catch (error) {
+      console.error('Error fetching users:', error);
+      return res.status(500).send(this.responseFailed('Internal server error'));
+    }
+  }
+
+  /**
+   * Alternative simplified pagination method
+   */
+  async getAllUsersSimple(req, res) {
+    try {
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || parseInt(process.env.RECORDS_PER_PAGE) || 10;
+      const skip = (page - 1) * limit;
+
+      const users = await User.find({})
+        .select('-password -otp -otpExpires -passcode -accessToken -__v')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean();
+
+      const total = await User.countDocuments();
+
+      return res.status(200).send({
+        status: 'success',
+        message: 'Users retrieved successfully',
+        data: {
+          users,
+          pagination: {
+            total,
+            totalPages: Math.ceil(total / limit),
+            currentPage: page,
+            limit
+          }
+        }
+      });
+
+    } catch (error) {
+      console.error('Error fetching users:', error);
+      return res.status(500).send(this.responseFailed('Internal server error'));
+    }
+  }
+
+  /**
+   * Get user by ID (Admin only)
+   */
+  async getUserById(req, res) {
+    try {
+      const { id } = req.params;
+
+      // Validate ID
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).send(this.responseFailed('Invalid user ID'));
+      }
+
+      const user = await User.findById(id)
+        .select('-password -otp -otpExpires -passcode -accessToken -__v');
+
+      if (!user) {
+        return res.status(404).send(this.responseFailed('User not found'));
+      }
+
+      return res.status(200).send({
+        status: 'success',
+        message: 'User retrieved successfully',
+        data: user
+      });
+
+    } catch (error) {
+      console.error('Error fetching user:', error);
+      return res.status(500).send(this.responseFailed('Internal server error'));
+    }
+  }
+
+  /**
+   * Update user status (Admin only)
+   */
+  async updateUserStatus(req, res) {
+    try {
+      const { id } = req.params;
+      const { isActive } = req.body;
+
+      if (typeof isActive !== 'boolean') {
+        return res.status(400).send(this.responseFailed('isActive must be a boolean'));
+      }
+
+      // Validate ID
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).send(this.responseFailed('Invalid user ID'));
+      }
+
+      const user = await User.findByIdAndUpdate(
+        id,
+        { isActive },
+        { new: true, runValidators: true }
+      ).select('-password -otp -otpExpires -passcode -accessToken -__v');
+
+      if (!user) {
+        return res.status(404).send(this.responseFailed('User not found'));
+      }
+
+      const statusText = isActive ? 'activated' : 'deactivated';
+      return res.status(200).send({
+        status: 'success',
+        message: `User ${statusText} successfully`,
+        data: user
+      });
+
+    } catch (error) {
+      console.error('Error updating user status:', error);
+      return res.status(500).send(this.responseFailed('Internal server error'));
+    }
+  }
+
+  /**
+   * Update user role (Admin only)
+   */
+  async updateUserRole(req, res) {
+    try {
+      const { id } = req.params;
+      const { role } = req.body;
+
+      const validRoles = ['user', 'agent', 'admin'];
+      if (!role || !validRoles.includes(role)) {
+        return res.status(400).send(
+          this.responseFailed(`Role must be one of: ${validRoles.join(', ')}`)
+        );
+      }
+
+      // Validate ID
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).send(this.responseFailed('Invalid user ID'));
+      }
+
+      // Prevent admin from removing their own admin role
+      if (req.user.user_id.toString() === id && role !== 'admin') {
+        return res.status(400).send(
+          this.responseFailed('You cannot remove admin role from yourself')
+        );
+      }
+
+      const user = await User.findByIdAndUpdate(
+        id,
+        { role },
+        { new: true, runValidators: true }
+      ).select('-password -otp -otpExpires -passcode -accessToken -__v');
+
+      if (!user) {
+        return res.status(404).send(this.responseFailed('User not found'));
+      }
+
+      return res.status(200).send({
+        status: 'success',
+        message: `User role updated to ${role} successfully`,
+        data: user
+      });
+
+    } catch (error) {
+      console.error('Error updating user role:', error);
+      return res.status(500).send(this.responseFailed('Internal server error'));
     }
   }
 
