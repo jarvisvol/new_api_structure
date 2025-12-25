@@ -464,115 +464,6 @@ class UserController extends BaseController {
   }
 
   /**
-   * Alternative simplified pagination method
-   */
-  async getAllUsersSimple(req, res) {
-    try {
-      const page = parseInt(req.query.page) || 1;
-      const limit = parseInt(req.query.limit) || parseInt(process.env.RECORDS_PER_PAGE) || 10;
-      const skip = (page - 1) * limit;
-
-      const users = await User.find({})
-        .select('-password -otp -otpExpires -passcode -accessToken -__v')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean();
-
-      const total = await User.countDocuments();
-
-      return res.status(200).send({
-        status: 'success',
-        message: 'Users retrieved successfully',
-        data: {
-          users,
-          pagination: {
-            total,
-            totalPages: Math.ceil(total / limit),
-            currentPage: page,
-            limit
-          }
-        }
-      });
-
-    } catch (error) {
-      console.error('Error fetching users:', error);
-      return res.status(500).send(this.responseFailed('Internal server error'));
-    }
-  }
-
-  /**
-   * Get user by ID (Admin only)
-   */
-  async getUserById(req, res) {
-    try {
-      const { id } = req.params;
-
-      // Validate ID
-      if (!mongoose.Types.ObjectId.isValid(id)) {
-        return res.status(400).send(this.responseFailed('Invalid user ID'));
-      }
-
-      const user = await User.findById(id)
-        .select('-password -otp -otpExpires -passcode -accessToken -__v');
-
-      if (!user) {
-        return res.status(404).send(this.responseFailed('User not found'));
-      }
-
-      return res.status(200).send({
-        status: 'success',
-        message: 'User retrieved successfully',
-        data: user
-      });
-
-    } catch (error) {
-      console.error('Error fetching user:', error);
-      return res.status(500).send(this.responseFailed('Internal server error'));
-    }
-  }
-
-  /**
-   * Update user status (Admin only)
-   */
-  async updateUserStatus(req, res) {
-    try {
-      const { id } = req.params;
-      const { isActive } = req.body;
-
-      if (typeof isActive !== 'boolean') {
-        return res.status(400).send(this.responseFailed('isActive must be a boolean'));
-      }
-
-      // Validate ID
-      if (!mongoose.Types.ObjectId.isValid(id)) {
-        return res.status(400).send(this.responseFailed('Invalid user ID'));
-      }
-
-      const user = await User.findByIdAndUpdate(
-        id,
-        { isActive },
-        { new: true, runValidators: true }
-      ).select('-password -otp -otpExpires -passcode -accessToken -__v');
-
-      if (!user) {
-        return res.status(404).send(this.responseFailed('User not found'));
-      }
-
-      const statusText = isActive ? 'activated' : 'deactivated';
-      return res.status(200).send({
-        status: 'success',
-        message: `User ${statusText} successfully`,
-        data: user
-      });
-
-    } catch (error) {
-      console.error('Error updating user status:', error);
-      return res.status(500).send(this.responseFailed('Internal server error'));
-    }
-  }
-
-  /**
    * Update user role (Admin only)
    */
   async updateUserRole(req, res) {
@@ -618,6 +509,64 @@ class UserController extends BaseController {
     } catch (error) {
       console.error('Error updating user role:', error);
       return res.status(500).send(this.responseFailed('Internal server error'));
+    }
+  }
+
+  async deleteUser(req, res) {
+    try {
+      const { id } = req.params;
+
+      // Validate ID format
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({
+          status: 'failed',
+          message: 'Invalid user ID format'
+        });
+      }
+
+      // Find the user
+      const user = await User.findById(id);
+      if (!user) {
+        return res.status(404).json({
+          status: 'failed',
+          message: 'User not found'
+        });
+      }
+
+      // Prevent admin from deleting themselves
+      if (req.user.user_id.toString() === id) {
+        return res.status(400).json({
+          status: 'failed',
+          message: 'You cannot delete your own account'
+        });
+      }
+      await User.findByIdAndDelete(id);
+
+      return res.status(200).json({
+        status: 'success',
+        message: 'User deleted successfully',
+        data: {
+          userId: id,
+          email: user.email,
+          name: user.name
+        }
+      });
+
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      
+      // Handle specific MongoDB errors
+      if (error.name === 'CastError') {
+        return res.status(400).json({
+          status: 'failed',
+          message: 'Invalid user ID'
+        });
+      }
+
+      return res.status(500).json({
+        status: 'failed',
+        message: 'Internal server error'
+      });
     }
   }
 

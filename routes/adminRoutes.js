@@ -39,6 +39,11 @@ router.put('/user/:id',
   (req, res) => userController.updateUserRole(req, res)
 );
 
+router.delete('/user/:id', 
+  (req, res, next) => userController.authenticateAdminOnly(req, res, next),
+  (req, res) => userController.deleteUser(req, res)
+);
+
 router.get('/users', 
   (req, res, next) => userController.authenticateAdminAgent(req, res, next),
   (req, res) => userController.getAllUsers(req, res)
