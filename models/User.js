@@ -69,21 +69,6 @@ const userSchema = new mongoose.Schema({
       message: props => `${props.value} is not a valid Indian phone number!`
     }
   },
-  
-  address: {
-    type: addressSchema,
-    required: [true, 'Address is required']
-  },
-  
-  landType: {
-    type: String,
-    required: [true, 'Land type is required'],
-    enum: {
-      values: ['agricultural', 'residential', 'commercial', 'industrial', 'forest', 'barren', 'pasture', 'other'],
-      message: '{VALUE} is not a valid land type'
-    },
-    default: 'agricultural'
-  },
 
   password: {
     type: String,
@@ -115,11 +100,6 @@ const userSchema = new mongoose.Schema({
   isVerified: {
     type: Boolean,
     default: false
-  },
-
-  passcode: {
-    type: String,
-    select: false
   },
 
   accessToken: {

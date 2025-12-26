@@ -15,16 +15,11 @@ class UserController extends BaseController {
 
   async registerUser(req, res) {
     try {
-      const { name, email, phoneNumber, password, address, isVerified, landType, role_type } = req.body;
+      const { name, email, phoneNumber, password, isVerified, role_type } = req.body;
 
       // Basic validation
-      if (!name || !email || !phoneNumber || !password || !address || !landType) {
+      if (!name || !email || !phoneNumber || !password) {
         return res.status(400).send(this.responseFailed('All fields are required'));
-      }
-
-      // Validate address has city
-      if (!address.city) {
-        return res.status(400).send(this.responseFailed('City is required in address'));
       }
 
       // Check if user already exists
@@ -50,8 +45,6 @@ class UserController extends BaseController {
         email,
         phoneNumber,
         password: hashedPassword,
-        address,
-        landType,
         otp,
         otpExpires,
         otpVerified: isVerified ? true : false,
