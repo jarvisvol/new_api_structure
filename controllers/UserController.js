@@ -15,7 +15,7 @@ class UserController extends BaseController {
 
   async registerUser(req, res) {
     try {
-      const { name, email, phoneNumber, password, isVerified, role_type } = req.body;
+      const { name, email, phoneNumber, password, role_type } = req.body;
 
       // Basic validation
       if (!name || !email || !phoneNumber || !password) {
@@ -47,15 +47,15 @@ class UserController extends BaseController {
         password: hashedPassword,
         otp,
         otpExpires,
-        otpVerified: isVerified ? true : false,
-        isVerified: isVerified ? true : false,
+        otpVerified: true,
+        isVerified: true,
         isActive: true,
         role: (role_type && ['user', 'admin', 'agent'].includes(role_type)) ? role_type : 'user'
       });
 
 
       // Send OTP email
-      this.MailSender.mailToSomeone(email, otp);
+      // this.MailSender.mailToSomeone(email, otp);
 
       return res.status(201).send(this.responseSuccess('Registration successful. Please verify OTP.', {
         userId: user._id,

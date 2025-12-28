@@ -2,23 +2,43 @@ const Property = require('../models/Property');
 const mongoose = require('mongoose');
 const BaseController = require('./BaseController');
 require('dotenv').config();
+const s3Client = require('../database/s3config');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+const { PutObjectCommand } = require('@aws-sdk/client-s3');
+
 
 class PropertyController extends BaseController {
   constructor() {
     super();
   }
 
+  async getPresignedUrls(keys, contentType = 'image/jpeg') {
+    const urls = [];
+
+    for (const key of keys) {
+      const command = new PutObjectCommand({
+        Bucket: process.env.AWS_S3_BUCKET_NAME,
+        Key: key,
+        ContentType: contentType,
+      });
+
+      const url = await getSignedUrl(s3Client, command, {
+        expiresIn: 300 // URL expires in 5 minutes
+      });
+
+      urls.push({
+        key,
+        url,
+        contentType
+      });
+    }
+
+    return urls;
+  }
+
   // 1. CREATE - Add new property
   async createProperty(req, res) {
     try {
-      const { property: propertyJson } = req.body;
-      let propertyData;
-      try {
-        propertyData = JSON.parse(propertyJson); // Use propertyJson instead of property
-      } catch (parseError) {
-        return res.status(400).send(this.responseFailed('Invalid property data format'));
-      }
-
       const {
         streetAddress,
         city,
@@ -35,8 +55,9 @@ class PropertyController extends BaseController {
         railwayDistance,
         nearestBusStandName,
         busDistance,
-        createdBy
-      } = propertyData;
+        createdBy,
+        imageCount = 3 // Default to 3 images, can be overridden by frontend
+      } = req.body;
 
       // Basic validation
       if (!streetAddress || !city || !state || !zipCode || !country ||
@@ -68,7 +89,6 @@ class PropertyController extends BaseController {
       }
 
       // Process images from FormData (if any)
-
       // Structure the data according to your schema
       const structuredPropertyData = {
         propertyAddress: {
@@ -103,7 +123,8 @@ class PropertyController extends BaseController {
           }
         },
         createdBy: req.user?.user_id || createdBy,
-        lastUpdatedBy: req.user?.user_id || createdBy
+        lastUpdatedBy: req.user?.user_id || createdBy,
+        images: [] // Initialize empty images array
       };
 
       // Add builtUpArea if provided
@@ -113,15 +134,38 @@ class PropertyController extends BaseController {
           unit: 'sqft'
         };
       }
+
       // Create and save the new property
       const newProperty = await Property.create(structuredPropertyData);
+
+      // Generate presigned URLs for multiple images (3-5 images)
+      const numberOfImages = Math.min(Math.max(imageCount, 3), 5); // Ensure between 3-5
+      const imageKeys = [];
+
+      for (let i = 0; i < numberOfImages; i++) {
+        // Generate unique key for each image
+        const timestamp = Date.now();
+        const imageKey = `properties/${newProperty._id}/image-${i + 1}-${timestamp}.jpeg`;
+        imageKeys.push(imageKey);
+      }
+
+      // Get presigned URLs for all images
+      const presignedUrls = await this.getPresignedUrls(imageKeys);
+
+      // Generate public URLs for the images (for frontend to use after upload)
+      const imageUrls = imageKeys.map(key => ({
+        key,
+        url: `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`
+      }));
 
       return res.status(201).send(this.responseSuccess('Property created successfully', {
         propertyId: newProperty._id,
         address: `${newProperty.propertyAddress.streetAddress}, ${newProperty.propertyAddress.city}`,
         price: newProperty.price.amount,
         currency: newProperty.price.currency,
-        message: 'Property listed successfully'
+        presignedUrls, // Array of objects with key and presigned URL
+        imageUrls, // Array of public URLs (will be accessible after upload)
+        message: 'Property created. Upload images using the provided URLs.'
       }));
     } catch (err) {
       if (err.name === 'ValidationError') {
@@ -132,35 +176,44 @@ class PropertyController extends BaseController {
       if (err.code === 11000) {
         return res.status(400).send(this.responseFailed('Property already exists'));
       }
-
       return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
   }
 
-  // 2. READ - Get single property by ID
-  async getPropertyById(req, res) {
+  // NEW METHOD: Update property with uploaded image URLs
+  async updatePropertyImages(req, res) {
     try {
-      const { id } = req.params;
+      const { propertyId } = req.params;
+      const { images } = req.body; // Array of objects with { key, url }
 
-      console.log('🔍 Getting property by ID:', id);
-
-      if (!mongoose.Types.ObjectId.isValid(id)) {
-        return res.status(400).send(this.responseFailed('Invalid property ID'));
+      if (!propertyId || !images || !Array.isArray(images)) {
+        return res.status(400).send(this.responseFailed('Property ID and images array are required'));
       }
 
-      const property = await Property.findById(id)
-        .populate('createdBy', 'name email phoneNumber')
-        .populate('lastUpdatedBy', 'name email phoneNumber');
-
+      // Find the property
+      const property = await Property.findById(propertyId);
       if (!property) {
         return res.status(404).send(this.responseFailed('Property not found'));
       }
 
-      console.log('✅ Property found:', property._id);
+      // Update property with image URLs
+      property.images = images.map(img => ({
+        key: img.key,
+        url: img.url,
+        uploadedAt: new Date()
+      }));
 
-      return res.status(200).send(this.responseSuccess('Property retrieved successfully', property));
+      property.lastUpdatedBy = req.user?.user_id;
+      property.updatedAt = new Date();
+
+      await property.save();
+
+      return res.status(200).send(this.responseSuccess('Images updated successfully', {
+        propertyId,
+        images: property.images,
+        message: `${images.length} image(s) added to property`
+      }));
     } catch (err) {
-      console.error('❌ Get property error:', err);
       return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
   }
@@ -169,9 +222,6 @@ class PropertyController extends BaseController {
   async updateProperty(req, res) {
     try {
       const { id } = req.params;
-
-      console.log('✏️ Updating property:', id, 'by user:', req.user?.user_id);
-
       if (!mongoose.Types.ObjectId.isValid(id)) {
         return res.status(400).send(this.responseFailed('Invalid property ID'));
       }
@@ -193,13 +243,8 @@ class PropertyController extends BaseController {
       property.updatedAt = Date.now();
 
       await property.save();
-
-      console.log('✅ Property updated successfully:', property._id);
-
       return res.status(200).send(this.responseSuccess('Property updated successfully', property));
     } catch (err) {
-      console.error('❌ Update property error:', err);
-
       if (err.name === 'ValidationError') {
         const errors = Object.values(err.errors).map(error => error.message);
         return res.status(400).send(this.responseFailed(errors.join(', ')));
@@ -209,13 +254,31 @@ class PropertyController extends BaseController {
     }
   }
 
+  // 2. READ - Get single property by ID
+  async getPropertyById(req, res) {
+    try {
+      const { id } = req.params;
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).send(this.responseFailed('Invalid property ID'));
+      }
+
+      const property = await Property.findById(id)
+        .populate('createdBy', 'name email phoneNumber')
+        .populate('lastUpdatedBy', 'name email phoneNumber');
+
+      if (!property) {
+        return res.status(404).send(this.responseFailed('Property not found'));
+      }
+      return res.status(200).send(this.responseSuccess('Property retrieved successfully', property));
+    } catch (err) {
+      return res.status(500).send(this.responseFailed('Internal Server Error'));
+    }
+  }
+
   // 4. DELETE - Delete property
   async deleteProperty(req, res) {
     try {
       const { id } = req.params;
-
-      console.log('🗑️ Deleting property:', id, 'by user:', req.user?.user_id);
-
       if (!mongoose.Types.ObjectId.isValid(id)) {
         return res.status(400).send(this.responseFailed('Invalid property ID'));
       }
@@ -232,12 +295,8 @@ class PropertyController extends BaseController {
       }
 
       await Property.findByIdAndDelete(id);
-
-      console.log('✅ Property deleted successfully:', id);
-
       return res.status(200).send(this.responseSuccess('Property deleted successfully'));
     } catch (err) {
-      console.error('❌ Delete property error:', err);
       return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
   }
@@ -245,8 +304,6 @@ class PropertyController extends BaseController {
   // 5. LIST - Get all properties with pagination & filters
   async getAllProperties(req, res) {
     try {
-      console.log('📋 Getting all properties with filters');
-
       // Pagination
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || process.env.PAGINATION_LIMIT || 10;
@@ -351,9 +408,6 @@ class PropertyController extends BaseController {
 
       const total = await Property.countDocuments(filter);
       const totalPages = Math.ceil(total / limit);
-
-      console.log('✅ Properties retrieved:', properties.length);
-
       return res.status(200).send(this.responseSuccess('Properties retrieved successfully', {
         count: properties.length,
         total,
@@ -363,7 +417,6 @@ class PropertyController extends BaseController {
         data: properties
       }));
     } catch (err) {
-      console.error('❌ Get all properties error:', err);
       return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
   }
@@ -371,8 +424,6 @@ class PropertyController extends BaseController {
   // 6. SEARCH - Advanced property search
   async searchProperties(req, res) {
     try {
-      console.log('🔎 Advanced property search');
-
       const {
         location,
         minPrice,
@@ -447,15 +498,12 @@ class PropertyController extends BaseController {
         .sort(sort)
         .limit(20);
 
-      console.log('✅ Search results:', properties.length);
-
       return res.status(200).send(this.responseSuccess('Search completed successfully', {
         count: properties.length,
         filters: req.query,
         data: properties
       }));
     } catch (err) {
-      console.error('❌ Search properties error:', err);
       return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
   }
@@ -464,9 +512,6 @@ class PropertyController extends BaseController {
   async getPropertiesByCity(req, res) {
     try {
       const { city } = req.params;
-
-      console.log('🏙️ Getting properties by city:', city);
-
       if (!city) {
         return res.status(400).send(this.responseFailed('City parameter is required'));
       }
@@ -476,16 +521,12 @@ class PropertyController extends BaseController {
       })
         .populate('createdBy', 'name email phoneNumber')
         .sort({ 'price.amount': 1 });
-
-      console.log('✅ Found properties:', properties.length, 'in', city);
-
       return res.status(200).send(this.responseSuccess(`Properties in ${city}`, {
         count: properties.length,
         city,
         data: properties
       }));
     } catch (err) {
-      console.error('❌ Get properties by city error:', err);
       return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
   }
@@ -494,9 +535,6 @@ class PropertyController extends BaseController {
   async getPropertiesByPriceRange(req, res) {
     try {
       const { min, max } = req.params;
-
-      console.log('💰 Getting properties in price range:', min, '-', max);
-
       if (!min || !max) {
         return res.status(400).send(this.responseFailed('Both min and max price are required'));
       }
@@ -517,16 +555,12 @@ class PropertyController extends BaseController {
       })
         .populate('createdBy', 'name email phoneNumber')
         .sort({ 'price.amount': 1 });
-
-      console.log('✅ Found properties:', properties.length, 'in price range');
-
       return res.status(200).send(this.responseSuccess('Properties in price range', {
         count: properties.length,
         priceRange: `${min} - ${max}`,
         data: properties
       }));
     } catch (err) {
-      console.error('❌ Get properties by price range error:', err);
       return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
   }
@@ -536,9 +570,6 @@ class PropertyController extends BaseController {
     try {
       const { distance } = req.params;
       const { station } = req.query;
-
-      console.log('🚉 Getting properties near railway:', distance, 'km', station ? `station: ${station}` : '');
-
       if (!distance) {
         return res.status(400).send(this.responseFailed('Distance parameter is required'));
       }
@@ -562,9 +593,6 @@ class PropertyController extends BaseController {
       const properties = await Property.find(filter)
         .populate('createdBy', 'name email phoneNumber')
         .sort({ 'distanceFromTransport.railwayStation.distance': 1 });
-
-      console.log('✅ Found properties:', properties.length, 'near railway');
-
       return res.status(200).send(this.responseSuccess('Properties near railway station', {
         count: properties.length,
         maxDistance,
@@ -572,7 +600,6 @@ class PropertyController extends BaseController {
         data: properties
       }));
     } catch (err) {
-      console.error('❌ Get properties near railway error:', err);
       return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
   }
@@ -580,8 +607,6 @@ class PropertyController extends BaseController {
   // 10. GET - Statistics and analytics
   async getPropertyStats(req, res) {
     try {
-      console.log('📊 Getting property statistics');
-
       const stats = await Property.aggregate([
         {
           $group: {
@@ -629,16 +654,12 @@ class PropertyController extends BaseController {
         .sort({ createdAt: -1 })
         .limit(5)
         .populate('createdBy', 'name email');
-
-      console.log('✅ Statistics generated');
-
       return res.status(200).send(this.responseSuccess('Property statistics', {
         ...stats[0],
         cityDistribution: cityStats,
         recentProperties
       }));
     } catch (err) {
-      console.error('❌ Get property stats error:', err);
       return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
   }
@@ -647,24 +668,17 @@ class PropertyController extends BaseController {
   async getMyProperties(req, res) {
     try {
       const userId = req.user?.user_id;
-
-      console.log('👤 Getting properties for user:', userId);
-
       if (!userId) {
         return res.status(401).send(this.responseFailed('User not authenticated'));
       }
 
       const properties = await Property.find({ createdBy: userId })
         .sort({ createdAt: -1 });
-
-      console.log('✅ Found user properties:', properties.length);
-
       return res.status(200).send(this.responseSuccess('Your properties', {
         count: properties.length,
         data: properties
       }));
     } catch (err) {
-      console.error('❌ Get my properties error:', err);
       return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
   }
@@ -673,9 +687,6 @@ class PropertyController extends BaseController {
   async getPropertiesByMultipleCities(req, res) {
     try {
       const { cities } = req.query;
-
-      console.log('🌆 Getting properties by multiple cities');
-
       if (!cities) {
         return res.status(400).send(this.responseFailed('Cities parameter is required'));
       }
@@ -687,16 +698,12 @@ class PropertyController extends BaseController {
       })
         .populate('createdBy', 'name email phoneNumber')
         .sort({ 'propertyAddress.city': 1, 'price.amount': 1 });
-
-      console.log('✅ Found properties:', properties.length, 'in', cityArray.length, 'cities');
-
       return res.status(200).send(this.responseSuccess('Properties in multiple cities', {
         count: properties.length,
         cities: cityArray,
         data: properties
       }));
     } catch (err) {
-      console.error('❌ Get properties by multiple cities error:', err);
       return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
   }
