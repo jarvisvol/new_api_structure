@@ -85,19 +85,12 @@ class UserController extends BaseController {
     try {
       const { email, password } = req.body;
 
-      console.log('🔑 Login attempt for:', email);
-
       // Find user with password selected
       const user = await User.findOne({ email }).select('+password +otpVerified +isActive');
 
       if (!user) {
-        console.log('❌ User not found');
         return res.status(400).send(this.responseFailed('Invalid email or password'));
       }
-
-      console.log('👤 User found:', user.email);
-      console.log('User active?', user.isActive);
-      console.log('OTP verified?', user.otpVerified);
 
       // Check if user is active
       if (!user.isActive) {
@@ -110,9 +103,7 @@ class UserController extends BaseController {
       }
 
       // Compare password using bcrypt
-      console.log('🔐 Comparing password...');
       const isPasswordValid = await bcrypt.compare(password, user.password);
-      console.log('Password valid?', isPasswordValid);
 
       if (isPasswordValid) {
         // Generate JWT token
@@ -127,14 +118,10 @@ class UserController extends BaseController {
           { expiresIn: '7d' }
         );
 
-        console.log('✅ Token generated');
-
         // 1. Save token to User model
         user.accessToken = token;
         user.lastLogin = new Date();
         await user.save({ validateBeforeSave: false });
-        console.log('✅ Token saved to User model');
-
         // 2. Save token to UserToken collection
         try {
           // Check if user already has a token
@@ -144,21 +131,16 @@ class UserController extends BaseController {
             // Update existing token
             existingToken.accessToken = token;
             await existingToken.save();
-            console.log('✅ Updated existing token in UserToken collection');
           } else {
             // Create new token
             await UserToken.create({
               user: user._id,
               accessToken: token
             });
-            console.log('✅ Created new token in UserToken collection');
           }
         } catch (tokenError) {
-          console.error('⚠️ Error saving to UserToken collection:', tokenError.message);
           // Continue even if UserToken save fails
         }
-
-        console.log('✅ Login successful');
 
         return res.status(200).send(this.responseSuccess('Login successful', {
           access_token: token,
@@ -173,11 +155,9 @@ class UserController extends BaseController {
           }
         }));
       } else {
-        console.log('❌ Invalid password');
         return res.status(400).send(this.responseFailed('Invalid credentials'));
       }
     } catch (err) {
-      console.error('❌ Login error:', err);
       return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
   }
@@ -185,15 +165,11 @@ class UserController extends BaseController {
   async checkToken(token) {
     try {
       if (!token) return null;
-
-      console.log('🔍 Checking token...');
-
       // First, try to find in UserToken collection
       const userToken = await UserToken.findOne({ accessToken: token })
         .populate('user', 'name email phoneNumber role');
 
       if (userToken && userToken.user) {
-        console.log('✅ Token found in UserToken collection');
         return {
           name: userToken.user.name,
           email: userToken.user.email,
@@ -204,7 +180,6 @@ class UserController extends BaseController {
       }
 
       // If not found in UserToken, try to verify JWT and find in User model
-      console.log('⚠️ Token not found in UserToken, checking User model...');
       const decoded = jwt.verify(token, process.env.JWT_TOKEN_KEY);
 
       const user = await User.findOne({
@@ -214,7 +189,6 @@ class UserController extends BaseController {
       });
 
       if (user) {
-        console.log('✅ Token found in User model');
         return {
           name: user.name,
           email: user.email,
@@ -224,11 +198,9 @@ class UserController extends BaseController {
         };
       }
 
-      console.log('❌ Token not found in any collection');
       return null;
 
     } catch (err) {
-      console.error('❌ Check token error:', err.message);
       return null;
     }
   }
@@ -241,9 +213,6 @@ class UserController extends BaseController {
       if (!token) {
         return res.status(401).send(this.responseFailed('Access token required'));
       }
-
-      console.log('🚪 Logout attempt for token');
-
       // 1. Remove token from User model
       const decoded = jwt.verify(token, process.env.JWT_TOKEN_KEY);
       await User.findByIdAndUpdate(decoded.userId, {
@@ -252,12 +221,8 @@ class UserController extends BaseController {
 
       // 2. Remove token from UserToken collection
       await UserToken.deleteOne({ accessToken: token });
-
-      console.log('✅ Logout successful');
-
       return res.status(200).send(this.responseSuccess('Logged out successfully'));
     } catch (err) {
-      console.error('❌ Logout error:', err);
       if (err.name === 'JsonWebTokenError') {
         return res.status(401).send(this.responseFailed('Invalid token'));
       }
@@ -273,9 +238,6 @@ class UserController extends BaseController {
       if (!token) {
         return res.status(401).send(this.responseFailed('Access token required'));
       }
-
-      console.log('🔍 Getting user details for token');
-
       const userData = await this.checkToken(token);
 
       if (!userData) {
@@ -288,12 +250,8 @@ class UserController extends BaseController {
       if (!user) {
         return res.status(404).send(this.responseFailed('User not found'));
       }
-
-      console.log('✅ User details retrieved');
-
       return res.status(200).send(this.responseSuccess('User details retrieved successfully', user));
     } catch (err) {
-      console.error('❌ User detail error:', err);
       return res.status(500).send(this.responseFailed('Internal Server Error'));
     }
   }
@@ -451,7 +409,6 @@ class UserController extends BaseController {
       });
 
     } catch (error) {
-      console.error('Error fetching users:', error);
       return res.status(500).send(this.responseFailed('Internal server error'));
     }
   }
@@ -500,7 +457,6 @@ class UserController extends BaseController {
       });
 
     } catch (error) {
-      console.error('Error updating user role:', error);
       return res.status(500).send(this.responseFailed('Internal server error'));
     }
   }
@@ -545,9 +501,7 @@ class UserController extends BaseController {
         }
       });
 
-    } catch (error) {
-      console.error('Error deleting user:', error);
-      
+    } catch (error) {      
       // Handle specific MongoDB errors
       if (error.name === 'CastError') {
         return res.status(400).json({
